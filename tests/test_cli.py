@@ -41,3 +41,34 @@ def test_unknown_tool_errors_cleanly(tmp_path):
     r = CliRunner().invoke(main, _base(tmp_path / "j.jsonl") + ["nope"])
     assert r.exit_code != 0
     assert "Traceback" not in r.output
+
+
+def _failing_cli(tmp_path, exc):
+    from carbon.cli import build_cli
+    from carbon.core.registry import Registry
+
+    class Boom:
+        name = "can_inject"
+        destructive = True
+
+        def run(self, **kw):
+            raise exc
+
+    reg = Registry()
+    reg.register(Boom())
+    return build_cli(reg)
+
+
+def test_failed_destructive_run_is_journaled_and_clean(tmp_path):
+    from carbon.can.bus import BusOperationError
+
+    j = tmp_path / "j.jsonl"
+    cli = _failing_cli(tmp_path, BusOperationError("CAN send failed on channel 'x': down"))
+    r = CliRunner().invoke(cli, ["--yes"] + _base(j) + ["can_inject", "123", "aa"])
+    assert r.exit_code != 0
+    assert "Traceback" not in r.output
+    assert "send failed" in r.output
+    entry = json.loads(j.read_text().splitlines()[-1])
+    assert entry["tool"] == "can_inject" and entry["ok"] is False
+    assert entry["actor"] == "cli" and "send failed" in entry["summary"]
+    assert entry["params"]["arb_id"] == 0x123
