@@ -32,3 +32,24 @@ def test_open_unknown_interface_raises_bus_unavailable():
     with pytest.raises(BusUnavailableError) as ei:
         open_bus("can0", interface="nonexistent_iface")
     assert "can0" in str(ei.value)
+
+
+def test_send_failure_wrapped_as_bus_operation_error():
+    import can
+
+    from carbon.can.bus import BusOperationError
+
+    class Broken:
+        channel_info = "broken0"
+
+        def send(self, msg):
+            raise can.CanOperationError("tx queue full")
+
+        def recv(self, timeout=None):
+            raise can.CanOperationError("interface down")
+
+    with pytest.raises(BusOperationError, match="send failed.*broken0") as ei:
+        send_frame(Broken(), 0x1, b"\x00")
+    assert isinstance(ei.value.__cause__, can.CanOperationError)
+    with pytest.raises(BusOperationError, match="receive failed"):
+        receive_frames(Broken(), count=1)
