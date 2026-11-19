@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
 
-from carbon.can.bus import BusUnavailableError
+from carbon.can.bus import BusError
 from carbon.core.confirm import authorize
 from carbon.core.journal import Journal, JournalError
 from carbon.core.registry import Registry
+from carbon.core.result import ToolResult
 from carbon.tools.can_dump import CanDump
 from carbon.tools.can_inject import CanInject
 from carbon.tools.can_replay import CanReplay
@@ -72,15 +74,27 @@ def _make_command(adapter) -> click.Command:
             raise click.ClickException(
                 f"{adapter.name} is destructive: refused (use --yes to authorize)"
             )
+        # Refusals above are intentionally not journaled: nothing touched the bus.
         run_params = {"channel": g["channel"], "interface": g["interface"], **params}
+        started = datetime.now(timezone.utc)
+        journal = Journal(g["journal"])
         try:
             result = adapter.run(**run_params)
-        except (BusUnavailableError, ValueError, OSError) as exc:
+        except (BusError, ValueError, OSError) as exc:
+            # Failed/partial runs may already have hit the bus: journal the outcome.
+            failure = ToolResult(
+                tool=adapter.name, ok=False, summary=f"failed: {exc}",
+                started_at=started, ended_at=datetime.now(timezone.utc),
+            )
+            try:
+                journal.record(failure, _jsonable(run_params), ACTOR)
+            except JournalError as jexc:
+                raise click.ClickException(f"{exc} (additionally, {jexc})")
             raise click.ClickException(str(exc))
         try:
-            Journal(g["journal"]).record(result, _jsonable(run_params), ACTOR)
+            journal.record(result, _jsonable(run_params), ACTOR)
         except JournalError as exc:
-            raise click.ClickException(str(exc))
+            raise click.ClickException(f"{adapter.name} executed but {exc}")
         click.echo(result.summary)
         if not result.ok:
             ctx.exit(1)
