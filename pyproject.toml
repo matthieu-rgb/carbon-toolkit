@@ -10,6 +10,9 @@ requires-python = ">=3.11"
 license = { text = "GPL-3.0-or-later" }
 dependencies = ["python-can", "click"]
 
+[project.scripts]
+carbon = "carbon.cli:main"
+
 [project.optional-dependencies]
 dev = ["pytest"]
 
