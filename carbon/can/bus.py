@@ -7,8 +7,16 @@ import time
 import can
 
 
-class BusUnavailableError(Exception):
+class BusError(Exception):
+    """Base class for CARBON CAN bus errors."""
+
+
+class BusUnavailableError(BusError):
     """Raised when the requested CAN interface/channel cannot be opened."""
+
+
+class BusOperationError(BusError):
+    """Raised when a send/receive on an open bus fails."""
 
 
 def open_bus(channel: str, interface: str = "socketcan") -> can.BusABC:
@@ -24,7 +32,12 @@ def open_bus(channel: str, interface: str = "socketcan") -> can.BusABC:
 
 
 def send_frame(bus: can.BusABC, arb_id: int, data: bytes, extended: bool = False) -> None:
-    bus.send(can.Message(arbitration_id=arb_id, data=data, is_extended_id=extended))
+    try:
+        bus.send(can.Message(arbitration_id=arb_id, data=data, is_extended_id=extended))
+    except (can.CanError, OSError) as exc:
+        raise BusOperationError(
+            f"CAN send failed on channel {bus.channel_info!r} (id=0x{arb_id:x}): {exc}"
+        ) from exc
 
 
 def receive_frames(
@@ -35,6 +48,15 @@ def receive_frames(
     count=None: read until `timeout` seconds pass with no new frame.
     count=N: return once N frames arrived or `timeout` elapsed in total.
     """
+    try:
+        return _receive(bus, count, timeout)
+    except (can.CanError, OSError) as exc:
+        raise BusOperationError(
+            f"CAN receive failed on channel {bus.channel_info!r}: {exc}"
+        ) from exc
+
+
+def _receive(bus: can.BusABC, count: int | None, timeout: float) -> list[can.Message]:
     frames: list[can.Message] = []
     if count is None:
         while (msg := bus.recv(timeout=timeout)) is not None:
