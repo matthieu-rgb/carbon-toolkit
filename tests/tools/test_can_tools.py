@@ -3,6 +3,7 @@ import threading
 import time
 
 import pytest
+from can.interfaces import virtual
 
 from carbon.can.bus import open_bus, receive_frames, send_frame
 from carbon.tools.can_dump import CanDump
@@ -13,13 +14,23 @@ from carbon.tools.can_sniff import CanSniff
 CH = "carbon_tools_test"
 
 
-def _send_later(frames, delay=0.3):
+def _wait_for_receiver(deadline=10.0):
+    # Block until a second bus (the adapter's receiver) joins the channel.
+    end = time.monotonic() + deadline
+    while time.monotonic() < end:
+        with virtual.channels_lock:
+            if len(virtual.channels.get(CH, [])) >= 2:
+                return
+        time.sleep(0.005)
+    raise AssertionError("receiver never opened the virtual channel")
+
+
+def _send_later(frames):
     def work():
-        time.sleep(delay)
         bus = open_bus(CH, interface="virtual")
+        _wait_for_receiver()
         for arb, data, ext in frames:
             send_frame(bus, arb, data, ext)
-        time.sleep(0.2)
         bus.shutdown()
 
     t = threading.Thread(target=work)
