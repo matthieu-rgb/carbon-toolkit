@@ -31,6 +31,16 @@ def test_uds_scan_finds_supported_services(ecu_channel):
     assert str(len(res.data["supported"])) in res.summary
 
 
+def test_scan_is_side_effect_free_after_unlock(ecu_channel):
+    # Fix A: uds_scan must never change ECU state. Unlock, then scan, then the
+    # protected DID must STILL read back (a re-lock during scan would give 0x33).
+    assert UdsSecurityAccess().run(channel=ecu_channel, interface="virtual").ok
+    assert UdsScan().run(channel=ecu_channel, interface="virtual").ok
+    res = UdsReadDid().run(channel=ecu_channel, interface="virtual", did=0x1234)
+    assert res.ok, f"scan re-locked the ECU: {res.summary}"
+    assert bytes.fromhex(res.data["value"]) == b"\xde\xad\xbe\xef"
+
+
 def test_uds_session_extended_ok(ecu_channel):
     res = UdsSession().run(channel=ecu_channel, interface="virtual", session="extended")
     assert res.ok and res.tool == "uds_session"
