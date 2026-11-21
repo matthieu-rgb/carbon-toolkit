@@ -117,6 +117,20 @@ def test_clear_dtc_after_unlock_empties_store(ecu, client):
     assert len(resp.service_data.dtcs) == 0
 
 
+def test_bare_clear_dtc_never_clears_even_when_unlocked(ecu, client):
+    # Fix B: a bare 0x14 (no 3-byte group) is incorrectMessageLength (NRC 0x13)
+    # and must NOT clear DTCs, regardless of lock state. This mirrors how
+    # uds_scan probes a state-changing service with the bare SID.
+    _unlock(client)
+    client.conn.empty_rxqueue()
+    client.conn.send(b"\x14")  # bare SID, no group identifier
+    payload = client.conn.wait_frame(timeout=1.0)
+    assert payload == b"\x7F\x14\x13"  # incorrectMessageLengthOrInvalidFormat
+    # DTC store untouched: both preloaded DTCs still present.
+    resp = client.get_dtc_by_status_mask(0xFF)
+    assert len(resp.service_data.dtcs) == 2
+
+
 def test_session_reset_relocks_security(ecu, client):
     _unlock(client)
     assert client.read_data_by_identifier(0x1234).service_data.values[0x1234] == b"\xDE\xAD\xBE\xEF"
