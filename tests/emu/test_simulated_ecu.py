@@ -168,6 +168,39 @@ def test_config_is_frozen_dataclass():
         cfg.req_id = 0x123  # frozen
 
 
+def test_raising_handler_does_not_kill_server(ecu, client, caplog):
+    # Make one request handler raise, then prove the listener survived it and
+    # still answers a subsequent well-formed request.
+    original = ecu._handle_tester_present
+    calls = {"n": 0}
+
+    def boom(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("induced handler failure")
+        return original(request)
+
+    ecu._handle_tester_present = boom
+    with caplog.at_level("ERROR", logger="carbon.emu.ecu"):
+        # First tester_present triggers the raise -> no reply -> client times out.
+        with pytest.raises(Exception):
+            client.tester_present()
+        # Server is still alive: a fresh well-formed request is answered.
+        assert client.read_data_by_identifier(0xF190).service_data.values[0xF190] == b"CARBONSIMECU00001"
+        client.tester_present()  # second call now goes through the real handler
+    assert ecu._thread.is_alive()
+    assert any("listener error" in r.message for r in caplog.records)
+
+
+def test_garbage_frame_does_not_kill_server(ecu, channel):
+    # An empty/garbage UDS frame must not wedge the listener; a following valid
+    # request still gets a correct response.
+    with open_uds_client(channel, interface="virtual", timeout=1.0) as client:
+        client.conn.send(b"")  # empty PDU -> dispatch returns None, no reply
+        assert client.read_data_by_identifier(0xF190).service_data.values[0xF190] == b"CARBONSIMECU00001"
+    assert ecu._thread.is_alive()
+
+
 def test_stop_is_idempotent(channel):
     ecu = SimulatedEcu(channel, interface="virtual")
     ecu.start()
