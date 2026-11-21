@@ -8,7 +8,13 @@ version = "0.1.0"
 description = "CARBON - containerized automotive pentest toolkit"
 requires-python = ">=3.11"
 license = { text = "GPL-3.0-or-later" }
-dependencies = ["python-can", "click", "msgpack"]  # msgpack: udp_multicast smoke bus
+dependencies = [
+    "python-can",
+    "click",
+    "msgpack",  # msgpack: udp_multicast smoke bus
+    "can-isotp==2.0.7",  # pure-Python ISO-TP transport (UDS layer)
+    "udsoncan==1.26.1",  # UDS (ISO 14229) client (UDS layer)
+]
 
 [project.scripts]
 carbon = "carbon.cli:main"
