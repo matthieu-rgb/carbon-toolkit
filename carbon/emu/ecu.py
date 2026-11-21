@@ -20,6 +20,7 @@ _SESSION_EXTENDED = 0x03
 # Negative Response Codes (ISO 14229)
 _NRC_SERVICE_NOT_SUPPORTED = 0x11
 _NRC_SUBFUNCTION_NOT_SUPPORTED = 0x12
+_NRC_INCORRECT_MESSAGE_LENGTH = 0x13
 _NRC_REQUEST_SEQUENCE_ERROR = 0x24
 _NRC_REQUEST_OUT_OF_RANGE = 0x31
 _NRC_SECURITY_ACCESS_DENIED = 0x33
@@ -267,6 +268,12 @@ class SimulatedEcu:
         return self._positive(_SID_READ_DTC, payload, suppress)
 
     def _handle_clear_dtc(self, request: bytes) -> bytes | None:
+        # ClearDiagnosticInformation carries exactly a 3-byte groupOfDTC. A
+        # malformed request (e.g. the bare SID a scanner probes with) is
+        # rejected for length BEFORE any security/clear logic, so it can never
+        # clear DTCs regardless of lock state.
+        if len(request) != 4:
+            return self._negative(_SID_CLEAR_DTC, _NRC_INCORRECT_MESSAGE_LENGTH)
         if not self._unlocked:
             return self._negative(_SID_CLEAR_DTC, _NRC_SECURITY_ACCESS_DENIED)
         self._dtcs = []
