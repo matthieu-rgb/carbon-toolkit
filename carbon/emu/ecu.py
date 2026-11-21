@@ -2,6 +2,7 @@
 """A home-grown ISO-TP/UDS server: a simulated ECU for testing CARBON adapters."""
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass, field
 
@@ -9,6 +10,8 @@ import isotp
 
 from carbon.can.bus import open_bus
 from carbon.uds.seedkey import ExampleSeedKey, SeedKeyAlgorithm
+
+_log = logging.getLogger(__name__)
 
 # Session IDs
 _SESSION_DEFAULT = 0x01
@@ -148,12 +151,20 @@ class SimulatedEcu:
         assert self._stack is not None
         self.ready.set()  # the stack is started; we are about to dequeue frames
         while not self._stop.is_set():
-            request = self._stack.recv(block=True, timeout=0.2)
-            if request is None:
+            # Guard each request so one bad frame or unexpected error (a raising
+            # handler, a transient isotp recv/send failure) cannot silently kill
+            # the listener thread and wedge the server. The stop-Event path above
+            # stays outside the guard so a clean stop() still exits promptly.
+            try:
+                request = self._stack.recv(block=True, timeout=0.2)
+                if request is None:
+                    continue
+                response = self._dispatch(bytes(request))
+                if response is not None:
+                    self._stack.send(response)
+            except Exception:  # noqa: BLE001 - keep the server alive on any fault
+                _log.exception("SimulatedEcu listener error; dropping request")
                 continue
-            response = self._dispatch(bytes(request))
-            if response is not None:
-                self._stack.send(response)
 
     # -- UDS dispatch ------------------------------------------------------
 
