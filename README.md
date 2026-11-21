@@ -15,8 +15,8 @@ destructive actions and an append-only audit journal. Licensed GPL-3.0-or-later.
 
 ### Docker image (x86_64 and ARM64)
 
-    docker buildx build --platform linux/amd64,linux/arm64 -t carbon:0.1.0 .   # multi-arch (needs a registry or --push)
-    docker buildx build --load -t carbon:0.1.0 .                               # host arch only, into the local daemon
+    docker buildx build --platform linux/amd64,linux/arm64 -t carbon:0.2.0 .   # multi-arch (needs a registry or --push)
+    docker buildx build --load -t carbon:0.2.0 .                               # host arch only, into the local daemon
 
 The image bundles `carbon`, python-can and `can-utils`. It runs unprivileged
 and does not need `--privileged`.
@@ -29,10 +29,10 @@ Real CAN needs Linux. Create a virtual bus on the host (root, `vcan` module):
 
 Run the container on the host network so it sees `vcan0` (a socketcan socket needs no extra capability):
 
-    docker run --rm --network host -v "$PWD:/work" carbon:0.1.0 can_sniff --count 5
-    docker run --rm --network host -v "$PWD:/work" carbon:0.1.0 can_dump capture.log --count 100
-    docker run --rm --network host -v "$PWD:/work" carbon:0.1.0 --yes can_replay capture.log
-    docker run --rm --network host -v "$PWD:/work" carbon:0.1.0 --yes can_inject 7DF 0201
+    docker run --rm --network host -v "$PWD:/work" carbon:0.2.0 can_sniff --count 5
+    docker run --rm --network host -v "$PWD:/work" carbon:0.2.0 can_dump capture.log --count 100
+    docker run --rm --network host -v "$PWD:/work" carbon:0.2.0 --yes can_replay capture.log
+    docker run --rm --network host -v "$PWD:/work" carbon:0.2.0 --yes can_inject 7DF 0201
 
 Global options go before the subcommand: `--channel` (default `vcan0`),
 `--interface` (default `socketcan`), `--journal` (default `carbon-session.jsonl`),
@@ -59,7 +59,7 @@ while `can_dump` records it, injects a frame, checks that a destructive command
 without `--yes` is refused and that the journal has entries, then prints
 `cycle CAN OK` (exit 0) or fails (exit != 0).
 
-    docker run --rm carbon:0.1.0 smoke        # in the image
+    docker run --rm carbon:0.2.0 smoke        # in the image
     bash scripts/smoke_can_cycle.sh            # on a host where `carbon` is on PATH
 
 Bus selection is automatic: `vcan0` over socketcan when `scripts/setup_vcan.sh`
@@ -118,7 +118,7 @@ accepts other algorithms implementing `key_from_seed(seed) -> key`.
 
 - Linux with `vcan0` (see Quickstart): use `--channel vcan0` as above; run the
   ECU and the tools in containers with `--network host`, e.g.
-  `docker run --rm --network host carbon:0.1.0 emu start`.
+  `docker run --rm --network host carbon:0.2.0 emu start`.
 - No Linux/vcan (macOS, plain container): use a python-can emulated bus that is
   shared across processes, e.g. `--interface udp_multicast --channel 239.74.163.3`
   on both the ECU and the tools (the in-process `virtual` bus cannot be shared
@@ -134,6 +134,6 @@ locked DID refused, unlock, DID readable, 2 DTCs, clear, 0 DTC), stops the ECU,
 and prints `cycle UDS OK` (exit 0) or fails (exit != 0). Bus selection is the
 same as for the CAN smoke test.
 
-    docker run --rm --user root --cap-add NET_ADMIN --network host carbon:0.1.0 smoke-uds   # vcan0 in the image
-    docker run --rm carbon:0.1.0 smoke-uds                                                    # udp_multicast fallback
+    docker run --rm --user root --cap-add NET_ADMIN --network host carbon:0.2.0 smoke-uds   # vcan0 in the image
+    docker run --rm carbon:0.2.0 smoke-uds                                                    # udp_multicast fallback
     bash scripts/smoke_uds_cycle.sh                                                          # host with `carbon` on PATH
