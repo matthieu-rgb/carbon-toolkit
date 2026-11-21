@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -13,10 +14,18 @@ from carbon.core.confirm import authorize
 from carbon.core.journal import Journal, JournalError
 from carbon.core.registry import Registry
 from carbon.core.result import ToolResult
+from carbon.emu.ecu import EcuConfig, SimulatedEcu
 from carbon.tools.can_dump import CanDump
 from carbon.tools.can_inject import CanInject
 from carbon.tools.can_replay import CanReplay
 from carbon.tools.can_sniff import CanSniff
+from carbon.tools.uds_clear_dtc import UdsClearDtc
+from carbon.tools.uds_read_did import UdsReadDid
+from carbon.tools.uds_read_dtc import UdsReadDtc
+from carbon.tools.uds_scan import UdsScan
+from carbon.tools.uds_security_access import UdsSecurityAccess
+from carbon.tools.uds_session import UdsSession
+from carbon.uds.connection import UdsError
 
 DEFAULT_JOURNAL = "carbon-session.jsonl"  # relative to the current directory
 ACTOR = "cli"
@@ -25,7 +34,11 @@ ACTOR = "cli"
 def build_registry() -> Registry:
     """Single place where adapters are registered."""
     registry = Registry()
-    for adapter in (CanSniff(), CanDump(), CanReplay(), CanInject()):
+    for adapter in (
+        CanSniff(), CanDump(), CanReplay(), CanInject(),
+        UdsScan(), UdsSession(), UdsSecurityAccess(),
+        UdsReadDid(), UdsReadDtc(), UdsClearDtc(),
+    ):
         registry.register(adapter)
     return registry
 
@@ -61,6 +74,31 @@ _PARAMS: dict[str, list[click.Parameter]] = {
         click.Argument(["data"], callback=_hex_bytes, required=False, default=""),
         click.Option(["--extended"], is_flag=True, help="Use a 29-bit identifier."),
     ],
+    "uds_scan": [],
+    "uds_session": [
+        click.Option(
+            ["--session"], type=click.Choice(["default", "extended"]),
+            default="extended", show_default=True,
+        ),
+    ],
+    "uds_security_access": [
+        click.Option(["--level"], type=int, default=1, show_default=True),
+    ],
+    "uds_read_did": [
+        click.Argument(["did"], callback=_hex_id, required=False, default="F190"),
+    ],
+    "uds_read_dtc": [
+        click.Option(
+            ["--status-mask"], callback=_hex_id, default="FF", show_default=True,
+            help="DTC status mask (hex).",
+        ),
+    ],
+    "uds_clear_dtc": [
+        click.Option(
+            ["--group"], callback=_hex_id, default="FFFFFF", show_default=True,
+            help="DTC group (hex).",
+        ),
+    ],
 }
 
 
@@ -80,7 +118,7 @@ def _make_command(adapter) -> click.Command:
         journal = Journal(g["journal"])
         try:
             result = adapter.run(**run_params)
-        except (BusError, ValueError, OSError) as exc:
+        except (BusError, UdsError, ValueError, OSError) as exc:
             # Failed/partial runs may already have hit the bus: journal the outcome.
             failure = ToolResult(
                 tool=adapter.name, ok=False, summary=f"failed: {exc}",
@@ -111,6 +149,39 @@ def _jsonable(params: dict) -> dict:
     return {k: (v.hex() if isinstance(v, bytes) else v) for k, v in params.items()}
 
 
+def _build_emu_group() -> click.Group:
+    """`carbon emu`: long-running simulated ECU (not a registry adapter, not journaled)."""
+
+    @click.group("emu", help="Simulated ECU for practicing UDS safely.")
+    def emu():
+        pass
+
+    @emu.command("start", help="Run the simulated ECU until Ctrl-C.")
+    @click.option("--channel", default=None, help="Defaults to the global --channel.")
+    @click.option("--seed", callback=_hex_bytes, default=None, help="Security seed (hex).")
+    @click.pass_context
+    def start(ctx, channel, seed):
+        g = ctx.obj or {}
+        channel = channel or g.get("channel", "vcan0")
+        interface = g.get("interface", "socketcan")
+        config = EcuConfig(seed=seed) if seed else EcuConfig()
+        try:
+            with SimulatedEcu(channel, interface, config=config) as ecu:
+                click.echo(
+                    f"Simulated ECU on {channel} ({interface}): "
+                    f"request 0x{ecu.config.req_id:X} / response 0x{ecu.config.resp_id:X}"
+                )
+                click.echo("Ctrl-C to stop")
+                try:
+                    threading.Event().wait()
+                except KeyboardInterrupt:
+                    click.echo("Stopped.")
+        except (BusError, OSError) as exc:
+            raise click.ClickException(str(exc))
+
+    return emu
+
+
 def build_cli(registry: Registry | None = None) -> click.Group:
     registry = registry or build_registry()
 
@@ -128,6 +199,7 @@ def build_cli(registry: Registry | None = None) -> click.Group:
 
     for name in registry.names():
         group.add_command(_make_command(registry.get(name)))
+    group.add_command(_build_emu_group())
     return group
 
 

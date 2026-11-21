@@ -72,3 +72,51 @@ def test_failed_destructive_run_is_journaled_and_clean(tmp_path):
     assert entry["tool"] == "can_inject" and entry["ok"] is False
     assert entry["actor"] == "cli" and "send failed" in entry["summary"]
     assert entry["params"]["arb_id"] == 0x123
+
+
+def test_cli_registers_uds_commands():
+    from carbon.cli import build_cli
+
+    cli = build_cli()
+    for name in (
+        "uds_scan", "uds_session", "uds_security_access",
+        "uds_read_did", "uds_read_dtc", "uds_clear_dtc", "emu",
+    ):
+        assert name in cli.commands
+    assert "start" in cli.commands["emu"].commands
+
+
+def test_cli_clear_dtc_refused_without_yes_non_interactive(tmp_path):
+    j = tmp_path / "j.jsonl"
+    r = CliRunner().invoke(main, _base(j) + ["uds_clear_dtc"])
+    assert r.exit_code != 0
+    assert not j.exists()
+
+
+def test_cli_read_vin_end_to_end(tmp_path):
+    from carbon.emu.ecu import SimulatedEcu
+
+    j = tmp_path / "j.jsonl"
+    with SimulatedEcu("carbon-cli-e2e", interface="virtual"):
+        r = CliRunner().invoke(
+            main,
+            ["--channel", "carbon-cli-e2e", "--interface", "virtual",
+             "--journal", str(j), "uds_read_did", "F190"],
+        )
+    assert r.exit_code == 0, r.output
+    assert b"CARBONSIMECU00001".hex() in r.output
+    entry = json.loads(j.read_text().splitlines()[-1])
+    assert entry["tool"] == "uds_read_did" and entry["ok"] is True
+
+
+def test_cli_uds_timeout_is_journaled_and_clean(tmp_path):
+    # No ECU on this channel: the UDS timeout must not surface as a traceback.
+    j = tmp_path / "j.jsonl"
+    r = CliRunner().invoke(
+        main,
+        ["--channel", "carbon-cli-noecu", "--interface", "virtual",
+         "--journal", str(j), "uds_read_did"],
+    )
+    assert r.exit_code != 0
+    assert "Traceback" not in r.output
+    assert json.loads(j.read_text().splitlines()[-1])["ok"] is False
