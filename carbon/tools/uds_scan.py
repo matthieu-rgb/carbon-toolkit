@@ -11,6 +11,13 @@ Probes never perform a state-changing action. Where the natural request would
 be destructive (0x14 ClearDiagnosticInformation, 0x11 ECUReset, writes, ...),
 the probe is the bare SID with no parameters: an ECU that implements the
 service rejects it with NRC 0x13 (incorrectMessageLength) before acting.
+
+The same rule applies to otherwise-benign services whose documented request
+would mutate state: 0x10 DiagnosticSessionControl is probed with the bare SID
+(no sub-function) rather than ``0x10 0x01``, because switching to the default
+session would re-lock SecurityAccess and silently undo a prior unlock. The
+bare SID still proves the service exists (it answers with an NRC other than
+0x11) without changing the active session.
 """
 from __future__ import annotations
 
@@ -24,7 +31,7 @@ _NRC_SERVICE_NOT_SUPPORTED = 0x11
 
 # Harmless real requests for read-only / benign services.
 _PROBES: dict[int, bytes] = {
-    0x10: b"\x10\x01",  # DiagnosticSessionControl: default session
+    0x10: b"\x10",  # DiagnosticSessionControl: bare SID (no session switch)
     0x19: b"\x19\x02\xff",  # ReadDTCInformation: by status mask (read-only)
     0x22: b"\x22\xf1\x90",  # ReadDataByIdentifier: VIN (read-only)
     0x3E: b"\x3e\x00",  # TesterPresent
