@@ -198,6 +198,100 @@ de la TUI/Web et la surface MCP sont deux façades sur le même état vivant. C'
 possible le garde-fou destructif ci-dessous : une action demandée par l'IA via MCP peut être mise
 en attente et apparaître **immédiatement** pour approbation dans la TUI/Web.
 
+#### 5.4.1 Périmètre v0.3 — « premier pilotage par IA » (décision auteur 2026-11-22)
+
+La v0.3 livre le **découplage** promis par l'approche B : n'importe quel client MCP pilote le cœur,
+sans qu'aucun modèle ne soit embarqué. Elle est volontairement cadrée pour un socle testable et
+indépendant, **avant** le moteur de méthodologie YAML (v0.4) et la TUI/Web (v0.4/v0.5).
+
+**SDK & libs.** SDK MCP Python officiel (`mcp`, API **FastMCP**), **épinglé** et vérifié par test
+comme on l'a fait pour `udsoncan`/`can-isotp` (ne jamais supposer une API ; l'implémenteur inspecte
+la version installée, l'épingle, et prouve par test). On **enveloppe** le SDK, on ne le réécrit pas
+(règle d'or). Le serveur MCP ne contient aucune méthodologie et n'appelle les outils **que** par le
+registre d'adaptateurs existant (aucun chemin d'exécution parallèle à la CLI).
+
+**Trois surfaces, dont une encore creuse à ce jalon :**
+- **Outils** — les **10 adaptateurs existants** (`can_sniff`, `can_dump`, `can_replay`,
+  `can_inject`, `uds_scan`, `uds_session`, `uds_security_access`, `uds_read_did`, `uds_read_dtc`,
+  `uds_clear_dtc`) exposés en outils MCP. Entrées validées aux frontières, **sortie structurée**
+  (le `ToolResult`), paramètres dérivés des mêmes options que la CLI. L'IA pilote **exactement** ce
+  que la CLI pilote — ni plus, ni moins.
+- **État/session** — position/journal/derniers résultats/liste d'outils disponibles, lus sur la
+  **même instance de session** que la CLI. La surface **méthodologie reste « aucune chargée / mode
+  libre »** jusqu'au moteur YAML (v0.4) ; elle existe mais ne propose pas d'étapes.
+- **Ressources** — export du **journal/rapport** de session (lecture seule).
+
+**Garde-fou destructif (le livrable sécurité central de v0.3, comble le trou d'Exegol MCP).** Un
+appel d'outil **destructif** d'**origine MCP** (p. ex. `uds_clear_dtc`) **n'exécute jamais
+directement** : il entre dans une **file d'approbation** en mémoire (état `pending-approval` +
+identifiant court), **bloque** l'appel MCP, et n'exécute qu'après approbation **humaine explicite**.
+Le `--yes` de la CLI (confirmation pour un appel **humain direct**) est **ignoré pour toute origine
+MCP** : l'IA détient le token, elle s'auto-accorderait sinon et viderait la garantie. L'**origine**
+de l'appel (CLI humaine vs MCP) est donc un attribut de premier plan porté jusqu'au garde-fou.
+
+**Canal d'approbation = hors du pipe MCP (décision).** L'approbation passe par un canal que
+**l'IA ne peut pas atteindre** :
+- **Mode HTTP + token Bearer** (`127.0.0.1`) — déploiement « réel » : la **console du serveur** est
+  libre, donc elle **porte l'approbation** (invite sur le terminal contrôlant le serveur, ou
+  commande locale listant/approuvant la file). C'est le mode qui tient l'exigence roadmap « auth
+  token » **et** les actions destructrices approuvées. C'est aussi le mode du scénario réseau
+  (sonde Pi).
+- **Mode stdio** (console = pipe du protocole) — pratique pour les clients type Claude Desktop :
+  sert les outils **non destructifs** et **refuse** le destructif (`pending-approval` impossible
+  faute de canal humain), avec une erreur claire. Transport ↔ capacité liés proprement, **sans IPC
+  inter-processus** à introduire à v0.3.
+- La machine pending-approval construite ici est l'**autorité partagée** ; la TUI/Web (v0.4) ne
+  fait qu'ajouter une **façade** d'approbation sur la même file, elle ne la réinvente pas.
+
+**Validation O6 (« un modèle local ET un frontière pilotent une session »).** Prouvée en CI **sans
+modèle ni réseau** par un **client MCP en mémoire** (fourni par le SDK) : il liste les outils, en
+exécute un non destructif (p. ex. `uds_scan` contre l'ECU simulée sur CAN virtuel), lit l'état, et
+vérifie qu'un outil destructif passe en `pending-approval` puis s'exécute après approbation
+simulée. Le pilotage réel par **Ollama (local)** et par **Claude (frontière)** est un **check manuel
+documenté** (comme `vcan0`/buildx le sont pour v0.1/v0.2), hors CI.
+
+**Hors périmètre v0.3** (confirmé, pour éviter la dérive) : moteur de méthodologie YAML et étapes
+(v0.4), TUI/Web (v0.4/v0.5), OAuth MCP (le token Bearer suffit v1, ENF-sécurité §7), surfaces
+DBC/captures riches (v0.5+), agent embarqué (ext. C).
+
+**Précisions d'implémentation (levée d'ambiguïtés, relecture builder 2026-11-22) :**
+- **Pas de démon, pas de commande `carbon approve` séparée, aucun IPC.** La **session** (cœur
+  partagé) et la **file d'approbation** vivent dans le **process du serveur MCP**. La CLI historique
+  reste un process **court et indépendant** qui ne partage que le **journal JSONL** sur disque.
+  L'approbation d'une action `pending-approval` est une **invite sur la console contrôlant le
+  serveur** (même process) — c'est ce que signifie « canal hors pipe MCP » à v0.3. La TUI (v0.4,
+  **même** process que le serveur) ne fera qu'ajouter une **façade** d'approbation sur cette même
+  file ; elle ne la réinvente pas. (Ceci lève la contradiction d'une file en mémoire approuvée
+  depuis un second process.)
+- **Modèle de concurrence du blocage.** Le serveur reste **réactif** pendant qu'un appel est en
+  attente : les outils **non destructifs continuent de passer**, et la console d'approbation reste
+  disponible (serveur multi-thread/async). L'appel destructif bloqué attend un **`threading.Event`
+  indexé par l'identifiant** d'approbation. **Pas de blocage infini** : un **timeout** (défaut
+  raisonnable, p. ex. 300 s) → **refus** (`ToolResult(ok=False)` « approbation expirée »), journalisé
+  comme refus. Une approbation → exécution réelle + journal ; un refus explicite → `ToolResult`
+  informatif, jamais d'exception.
+- **Pipeline d'exécution partagé (règle « aucun chemin parallèle à la CLI »).** Le pipeline
+  **garde-fou → `run()` → journal**, aujourd'hui inline dans `cli.py`, est **extrait** dans le cœur
+  (fonction/méthode de session) que **les deux** appelants invoquent. Il porte un attribut
+  **`origin` ∈ {CLI, MCP}** (et le transport pour MCP). `--yes` n'a d'effet que pour `origin=CLI` ;
+  pour `origin=MCP`, un outil destructif part **toujours** en `pending-approval` (ou refus en
+  stdio). L'`actor` du journal vaut **`"mcp"`** pour les appels MCP (contre `"cli"` aujourd'hui).
+- **`channel` / `interface` / `journal` = configuration au lancement du serveur**, **pas** des
+  paramètres par outil (ils sont des globals CLI posés une fois, pas des options par commande). La
+  « session » MCP est donc liée à **un bus et un journal** fixés au démarrage ; les schémas d'outils
+  ne les exposent pas.
+- **Schémas d'outils MCP = surface CLI exposée, en types programmatiques.** Chaque wrapper d'outil
+  déclare un schéma **typé et lisible par un modèle** (entiers pour les identifiants d'arbitrage,
+  octets/hex documenté pour les charges utiles) — **source de vérité unique par outil**, découplée
+  des callbacks `click` (ergonomie humaine) comme de la signature brute de `run()`. On expose **la
+  surface que la CLI expose** (`_PARAMS`) : les kwargs non exposés (`rxid`/`txid`) **restent à leurs
+  défauts** et n'apparaissent pas.
+- **Ce que renvoient les surfaces état/ressources à v0.3.** La session garde en mémoire un
+  **historique des derniers `ToolResult`** (ajout mineur) : c'est la base de « derniers résultats ».
+  La surface **méthodologie/position** répond « aucune chargée / mode libre » (pas d'étape proposée
+  tant que le moteur YAML n'existe pas, v0.4). La **ressource** est le **journal JSONL brut** en
+  lecture seule (le moteur de **rapport** formaté est v1.0).
+
 ### 5.5 Les deux modes (sur le même cœur)
 - **Guidé** : le moteur tient le fil, impose l'ordre des étapes ; l'IA (ou l'opérateur) interprète
   et explique. État de progression persistant et reprise (EF-14).
@@ -330,6 +424,8 @@ Le code sera écrit « proprement avec la sécurité appropriée » (demande de 
 | Langage/stack | Python (`python-can`, Scapy, `udsoncan`, SDK MCP Python, Textual) | choix auteur |
 | Moteur méthodo | Déclaratif YAML | choix auteur (tranche §11 exigences) |
 | Transport MCP | HTTP localhost + token Bearer ; stdio optionnel | choix auteur (aligné Exegol) |
+| Périmètre MCP/IA v0.3 | **10 adaptateurs existants en outils MCP + surface état/session + ressources journal** ; méthodo creuse jusqu'à v0.4 (§5.4.1). SDK **FastMCP** épinglé/vérifié par test. O6 prouvé en CI par client MCP en mémoire. | **validé auteur 2026-11-22** |
+| Garde-fou destructif via MCP v0.3 | **File `pending-approval` bloquante** ; approbation **hors pipe MCP** (console serveur en mode HTTP+token) ; `--yes` ignoré pour origine MCP ; **stdio refuse le destructif** faute de canal humain (§5.4.1). | **validé auteur 2026-11-22** |
 | Interfaces | TUI (Textual) + Web (FastAPI + front soigné `frontend-design`) | choix utilisateur |
 | Phasage UI | TUI d'abord, Web juste après, même cœur | choix auteur |
 | Agent embarqué (C) | Extension v1.x/v2, = client MCP de plus | choix utilisateur |
@@ -420,4 +516,7 @@ v2+   EXTENSIONS   CAN-FD, SOME/IP, reverse firmware, PwnDoc, sonde Pi avancee
 
 > **Statut : doc approuvé par l'auteur le 2026-11-19.** Socle v0.1 livré et mergé (PR #1).
 > **Périmètre v0.2 (UDS, Option A) approuvé le 2026-11-20** (§5.6.1) ; Option C planifiée comme
-> jalon d'apprentissage ultérieur. Étape suivante : plan d'implémentation v0.2.
+> jalon d'apprentissage ultérieur. v0.2 livré (PR #2).
+> **Périmètre v0.3 (MCP + IA branchable) approuvé le 2026-11-22** (§5.4.1) : 10 adaptateurs en
+> outils MCP, garde-fou destructif à file `pending-approval` approuvée hors pipe MCP, O6 prouvé par
+> client MCP en mémoire. Étape suivante : plan d'implémentation v0.3.
