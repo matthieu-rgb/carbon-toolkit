@@ -17,6 +17,7 @@ from carbon.uds.connection import UdsError
 class Origin(enum.Enum):
     CLI = "cli"
     MCP = "mcp"
+    TUI = "tui"
 
 
 class Decision(enum.Enum):
@@ -63,7 +64,7 @@ def execute_tool(
                              prompt_fn=prompt_fn):
                 raise ActionRefused(adapter.name)
         else:
-            # assume_yes is deliberately ignored: MCP needs explicit human approval.
+            # assume_yes is deliberately ignored: every non-CLI origin (MCP, TUI) needs explicit human approval.
             decision = (Decision.DENIED if approver is None
                         else approver.request(adapter.name, safe_params))
             if decision is not Decision.APPROVED:
