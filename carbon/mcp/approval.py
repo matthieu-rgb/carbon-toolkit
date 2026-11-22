@@ -33,8 +33,10 @@ class ApprovalQueue:
         self,
         timeout: float = 300.0,
         on_pending: Callable[[PendingApproval], None] | None = None,
+        on_resolved: Callable[[str, Decision], None] | None = None,
     ) -> None:
         self._timeout = timeout
+        self._on_resolved = on_resolved
         self._on_pending = on_pending
         self._lock = threading.Lock()
         self._table: dict[str, PendingApproval] = {}
@@ -53,9 +55,16 @@ class ApprovalQueue:
             if self._on_pending is not None:
                 self._on_pending(entry)
             entry._event.wait(self._timeout)
+            timed_out = False
             with self._lock:
                 # A decision posted right at expiry still wins (it was accepted).
-                return entry._decision if entry._decision is not None else Decision.TIMEOUT
+                if entry._decision is None:
+                    entry._decision = Decision.TIMEOUT  # later resolve() returns False
+                    timed_out = True
+                result = entry._decision
+            if timed_out:
+                self._notify_resolved(aid, Decision.TIMEOUT)
+            return result
         except Exception:  # never raise: caller must always be able to journal
             return Decision.DENIED
         finally:
@@ -74,7 +83,16 @@ class ApprovalQueue:
                 return False
             entry._decision = decision
             entry._event.set()
-            return True
+        self._notify_resolved(approval_id, decision)
+        return True
+
+    def _notify_resolved(self, approval_id: str, decision: Decision) -> None:
+        # Outside the lock; a raising callback must never affect the queue.
+        if self._on_resolved is not None:
+            try:
+                self._on_resolved(approval_id, decision)
+            except Exception:
+                pass
 
 
 class DenyingApprover:
