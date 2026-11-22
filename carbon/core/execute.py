@@ -67,7 +67,11 @@ def execute_tool(
             decision = (Decision.DENIED if approver is None
                         else approver.request(adapter.name, safe_params))
             if decision is not Decision.APPROVED:
-                result = _failure(adapter.name, f"{adapter.name}: {decision.value} (human approval)")
+                reason = getattr(approver, "reason", None)
+                summary = f"{adapter.name}: {decision.value} (human approval)"
+                if reason:
+                    summary += f" - {reason}"
+                result = _failure(adapter.name, summary)
 
     if result is None:
         try:
