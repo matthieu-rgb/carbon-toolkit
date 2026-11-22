@@ -51,10 +51,10 @@ class CombinedApp:
 def build_combined_app(*, channel: str, interface: str, journal_path: Path,
                        web_token: str, mcp_token: str, port: int, **kw: Any):
     """Returns (app, session, queue, broker)."""
+    kw.setdefault("state_path", journal_path.with_suffix(".state.json"))
     web_app, session, queue, broker = create_web_runtime(
         channel=channel, interface=interface, journal_path=journal_path,
-        token=web_token, port=port,
-        state_path=journal_path.with_suffix(".state.json"), **kw)
+        token=web_token, port=port, **kw)
     mcp_app = build_mcp_sub_app(session, mcp_token)
     return CombinedApp(web_app, mcp_app), session, queue, broker
 

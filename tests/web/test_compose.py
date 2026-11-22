@@ -108,3 +108,11 @@ def test_serve_web_rejects_non_localhost_bind(tmp_path):
     with pytest.raises(ValueError):
         serve_web(channel="x", interface="virtual", journal_path=tmp_path / "j",
                   host="0.0.0.0", port=8800)
+
+
+def test_build_combined_app_accepts_state_path_override(tmp_path):
+    app, session, _, _ = build_combined_app(
+        channel="compose-ch", interface="virtual", journal_path=tmp_path / "j.jsonl",
+        web_token=WEB_TOK, mcp_token=MCP_TOK, port=8799,
+        state_path=tmp_path / "custom.state.json")
+    assert app is not None

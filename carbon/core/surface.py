@@ -49,7 +49,7 @@ def build_surface(history: list[dict], *, channel: str,
         tool = r.get("tool")
         data = r.get("data") or {}
         if tool == "can_sniff":
-            for f in data.get("frames", []):
+            for f in (data.get("frames") or []):
                 arb = f.get("arbitration_id")
                 if isinstance(arb, int):
                     add(f"ecu:0x{arb:x}", "ecu", f"0x{arb:x}", bus)
@@ -60,7 +60,7 @@ def build_surface(history: list[dict], *, channel: str,
                        if isinstance(arb, int) else bus)
         elif tool == "uds_scan":
             uds_ecu()
-            for svc in data.get("supported", []):
+            for svc in (data.get("supported") or []):
                 add(f"svc:{UDS_ECU}:{svc}", "service", str(svc), ecu)
             current = ecu
         elif tool == "uds_session":
@@ -79,7 +79,7 @@ def build_surface(history: list[dict], *, channel: str,
                 current = ecu
         elif tool == "uds_read_dtc":
             uds_ecu()
-            for d in data.get("dtcs", []):
+            for d in (data.get("dtcs") or []):
                 code = d.get("code") if isinstance(d, dict) else str(d)
                 add(f"dtc:{UDS_ECU}:{code}", "dtc", str(code), ecu,
                     state=d.get("status") if isinstance(d, dict) else None)
