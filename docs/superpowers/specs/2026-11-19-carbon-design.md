@@ -494,6 +494,132 @@ global, §6) ; les configurations matérielles validées (adaptateurs, antennes)
 repli sans matériel. Le détail des modèles d'adaptateurs/antennes supportés et des règles udev est
 laissé au constructeur, à partir de cette liste.
 
+### 5.8 Périmètre v0.5 — Client Web + carte de surface d'attaque (décision auteur 2026-11-22)
+
+**Positionnement (rappel) :** CARBON vise **deux publics à la fois** — le débutant *découvre* le
+pentest auto avec (mode Guidé, UI qui explique), l'expert *l'utilise* pour de vrai (mode Libre
+rapide, sans friction). La carte v0.5 doit donc être **pédagogique** (lisible, légendée) **et dense
+et pilotable au clavier/clic** pour l'expert. Ce n'est pas un jouet d'apprentissage, c'est un outil
+pro à rampe d'accès douce.
+
+**Portée retenue (Approche 2 « carte pilotable + Libre ») :** le Web est un **client fin de plus**
+sur le même cœur vivant (règle d'or, §5.1, §5.4), apportant ce que le terminal ne sait pas faire :
+
+1. **Carte de surface d'attaque en temps réel (EF-21)** — graphe bus → ECU → services UDS →
+   niveaux de sécurité, avec la **position courante** mise en évidence, rafraîchie en direct.
+2. **Mode Libre pilotable** — clic sur un nœud/service → lance l'outil correspondant (EF-22). Le
+   Web **n'exécute rien lui-même** : il envoie une action au cœur, qui passe par le chemin unique
+   `Session.run_tool` → `execute_tool` (comme CLI/MCP/TUI).
+3. **Surface d'approbation Web** pour les actions destructrices (voir Sécurité ci-dessous).
+4. **Miroir d'état** — historique, journal, état de session en lecture directe.
+
+**Hors périmètre v0.5 (anti-dérive) :** le **mode Guidé reste en TUI** pour ce jalon (le portage
+du parcours guidé dans le Web est une itération ultérieure). Conséquence : **AC-11** (« TUI et Web
+exposent le même jeu d'actions ») est tenu pour le **Libre + destructif + carte** en v0.5, et
+**complété** (guidé Web) plus tard. Également hors périmètre : rapport (v1.0), captures/DBC riches
+(v0.5+ extensions).
+
+**Décisions de « comment » (calls auteur, à défaut de contre-indication) :**
+
+- **Même processus, état partagé.** Le serveur Web (`FastAPI`) tourne **dans le même processus**
+  que le cœur et le serveur MCP, sur la **même instance de `Session`**. C'est ce qui rend l'état
+  cohérent entre TUI/Web/MCP et permet à une approbation d'**apparaître immédiatement** dans le Web
+  (§5.4). Bind **`127.0.0.1`** uniquement, port local dédié.
+- **Modèle de surface d'attaque = projection dérivée (pas de nouvel état mutable).** La carte est
+  calculée par une **fonction pure** `carbon/core/surface.py :: build_surface(history) -> dict`
+  qui *replie* l'historique des `ToolResult` en un graphe (bus vus via `can_sniff`, ECU/arb-id,
+  services via `uds_scan`, session via `uds_session`, niveau déverrouillé via
+  `uds_security_access`, DTC…). Elle est **exposée dans `session.state()`** sous une clé `surface`,
+  donc TUI, Web **et MCP** y accèdent sans logique dupliquée (l'IA peut interroger la surface). La
+  règle d'or tient : aucune méthodo, aucun outil dans ce module — juste une vue.
+- **Transport temps réel = SSE + POST.** Le cœur **pousse** l'état au navigateur via **SSE**
+  (flux unidirectionnel, simple, adapté à « le cœur diffuse l'état ») ; le navigateur **envoie**
+  les actions (**lancer un outil**, **résoudre une approbation**) par **POST** classiques.
+  WebSocket envisagé et écarté : SSE+POST suffit et simplifie. **Le Web v0.5 est Libre uniquement**
+  — pas de bascule de mode depuis le Web (le Guidé reste en TUI), donc pas d'action « changer de
+  mode » côté Web.
+- **Rendu carte = `cytoscape.js`** (bibliothèque de graphes dédiée), front **léger sans framework
+  lourd**, servi par FastAPI. Direction visuelle via le skill `frontend-design`. Nœuds =
+  bus/ECU/service/niveau ; arêtes = contenance/atteignabilité ; nœud courant surligné ; légende
+  pour le débutant, navigation clavier + mode compact pour l'expert.
+
+**Sécurité (le garde-fou AC-10 ne doit JAMAIS être contourné) :**
+
+- **Nouvel `Origin.WEB = "web"`.** Une action destructrice d'origine Web → `pending-approval`,
+  **bloque**, et la **modale d'approbation s'affiche dans le Web** via le hook `on_pending` de
+  `ApprovalQueue` (même machinerie que la TUI en v0.4 — on branche une 2ᵉ façade sur l'autorité
+  partagée, on ne la réécrit pas). `assume_yes`/`--yes` **ignoré** pour l'origine Web (comme
+  MCP/TUI). Le Web ne peut jamais exécuter un destructif sans approbation humaine explicite.
+- **Un destructif sur `localhost` reste attaquable depuis le navigateur** (CSRF / DNS-rebinding :
+  une page web tierce peut POSTer vers `127.0.0.1`). Décisions : **token** généré au lancement
+  (comme MCP, stocké hors dépôt) ; **validation des en-têtes `Origin`/`Host`** (rejet cross-origin) ;
+  bind `127.0.0.1` strict. La validation des entrées à la frontière API UI (§6) s'applique.
+
+#### 5.8.1 Décisions d'implémentation (builder-check, 2026-11-22)
+
+Résolutions tranchées (auteur en autonomie) après relecture « constructeur ». Priorité : sécurité
+et qualité/beauté du code.
+
+1. **Hébergement / processus.** Nouvelle commande **`carbon web`** : **un seul processus** servant,
+   sur une même app ASGI **Starlette** (uvicorn `127.0.0.1`), le **sous-app MCP monté sous `/mcp`**
+   (protégé par le Bearer MCP) **et** l'UI + API Web sous `/` — le tout partageant **une seule
+   instance de `Session`** et **une seule `ApprovalQueue`**. Le Web est donc la **surface
+   d'approbation** du couple Web+MCP (la boucle console stdin n'est **pas** démarrée en mode
+   `carbon web`). La TUI reste un processus séparé (inchangée) ; son partage de process avec le MCP
+   n'est pas visé par v0.5.
+2. **Framework = Starlette, pas FastAPI.** `mcp==2.3.0` tire déjà Starlette + uvicorn ; on construit
+   le Web **directement sur Starlette** pour éviter une dépendance lourde et tout conflit de version
+   (le §11 laisse le choix du framework au constructeur). FastAPI écarté.
+3. **Auth navigateur = cookie, token distinct du MCP.** `EventSource`/`<script>` ne peuvent pas
+   poser d'en-tête ; donc : un **token Web dédié** (≠ token MCP, généré au lancement, hors dépôt) est
+   remis via une **URL d'amorçage à usage unique** (`/?k=<token>`) imprimée au lancement, échangée
+   contre un **cookie de session `HttpOnly` + `SameSite=Strict`**. `EventSource` et `fetch`
+   l'envoient automatiquement en same-origin ; JS n'y touche jamais ; `SameSite=Strict` + validation
+   `Origin`/`Host` bloquent le CSRF. **Le token MCP ne donne aucun accès Web** : une IA détentrice du
+   token MCP **ne peut ni piloter l'API Web ni résoudre une approbation** (le endpoint approve/deny
+   exige le cookie Web, hors de portée de l'IA). C'est la garantie AC-10 côté Web.
+4. **Middleware.** Le `BearerAuthMiddleware` enveloppe **uniquement** le sous-app `/mcp` ; les routes
+   Web ont leur propre garde cookie + `Origin`/`Host`. L'URL d'amorçage est la seule route non
+   authentifiée (consomme le token une fois, pose le cookie, redirige).
+5. **Modèle de surface.** `build_surface(history) -> dict` = fold **pur et monotone** (toute entité
+   découverte reste sur la carte) : `nodes` (`bus:<channel>`, `ecu:<arbid>`, `svc:<arbid>:<sid>`,
+   `level:<arbid>` avec `state: locked|unlocked`), `edges` (contenance), `current` (nœud du dernier
+   résultat réussi, ou cible de l'étape guidée si moteur présent), `session` (session active,
+   déverrouillé). Les champs d'**état** reflètent le **dernier** résultat pertinent ; un
+   `security_access` **échoué** ne déverrouille pas. Schéma **libre** (nouveau en v0.5, aucune AC ne
+   le fige) — **épinglé par les tests v0.5**. Fold O(n) sur `history` (plafonné à 50) : assez bon
+   marché, pas de cache ; limite documentée (découverte au-delà de 50 résultats retenus peut sortir
+   du fold). Le constructeur lit les clés `data` réelles de chaque outil (`can_sniff`→frames/arb-id,
+   `uds_scan`→supported, `uds_session`→session, `uds_security_access`→unlocked, `uds_read_dtc`→dtcs)
+   avant d'écrire le fold.
+6. **Concurrence `Session`.** Ajout d'un **verrou par session** (`threading.Lock`) pris dans
+   `run_tool` : jamais deux outils en parallèle sur un même bus (TUI/Web/MCP sérialisés) ; `history`
+   modifié sous ce verrou. Amélioration propre bénéficiant à toutes les façades. Les POST Web
+   s'exécutent en **thread worker** (`run_in_threadpool`) ; un POST destructif **tient la requête
+   ouverte** jusqu'à résolution/timeout (la modale apparaît en parallèle via SSE), puis renvoie le
+   `ToolResult`.
+7. **SSE.** Petit **broker pub/sub in-process** (`carbon/web/events.py`) ; `Session` gagne un
+   callback optionnel `on_change` appelé après chaque changement d'état, branché sur
+   `broker.publish`. Le endpoint SSE **pousse un snapshot `state()` complet** (petit, history≤50) à
+   la connexion puis à chaque changement, + un **heartbeat** périodique (`: ping`). SSE **fait-main**
+   via `StreamingResponse` (`text/event-stream`), **sans** nouvelle dépendance. Sur (re)connexion,
+   le snapshot courant **rejoue** les approbations en attente (`queue.pending()`) → une modale
+   survit à un rechargement ; aucun navigateur connecté → timeout 300s → refus (fail-closed).
+   Deux navigateurs résolvant la même approbation : le premier gagne, le second reçoit un
+   événement SSE « résolue » qui **ferme sa modale**.
+8. **Dépendances.** Pas de FastAPI (cf. 2). **cytoscape.js vendu** (vendored, air-gap §12), version
+   épinglée, **licence MIT consignée** pour l'audit GPL amont. `httpx` ajouté aux extras **dev**
+   (client ASGI de test) s'il manque.
+9. **Tests sans navigateur.** API + SSE + **sécurité** (token manquant, `Origin`/`Host` invalides,
+   cookie absent, `assume_yes` ignoré pour WEB, token MCP **refusé** sur les routes Web et sur
+   approve/deny, round-trip d'approbation sur CAN virtuel + ECU simulé) + unitaires `build_surface`.
+   Pas de test JS/Playwright : un contrôle de présence/structure des assets vendus suffit. AC-11 est
+   tenu pour **Libre + destructif + carte** ; pas de nouvelle AC requise.
+10. **Sémantique `Origin.WEB`.** Destructif = flag `adapter.destructive` (inchangé). L'API Web
+    **n'accepte pas** `assume_yes` (et `execute_tool` l'ignore déjà hors CLI). Paramètres validés à
+    la frontière contre le **schéma du registre** (réutilise la logique de validation de la surface
+    MCP). **Pas** d'action de bascule de mode côté Web v0.5 (Web = Libre).
+
 ---
 
 ## 6. Sécurité et conformité (décisions explicites)
@@ -552,6 +678,7 @@ Le code sera écrit « proprement avec la sécurité appropriée » (demande de 
 | Périmètre MCP/IA v0.3 | **10 adaptateurs existants en outils MCP + surface état/session + ressources journal** ; méthodo creuse jusqu'à v0.4 (§5.4.1). SDK `mcp==2.3.0` (API `MCPServer`) épinglé/vérifié par test. O6 prouvé en CI par client MCP en mémoire. | **validé auteur 2026-11-22** |
 | Garde-fou destructif via MCP v0.3 | **File `pending-approval` bloquante** ; approbation **hors pipe MCP** (console serveur en mode HTTP+token) ; `--yes` ignoré pour origine MCP ; **stdio refuse le destructif** faute de canal humain (§5.4.1). | **validé auteur 2026-11-22** |
 | Périmètre v0.4 Mode Guidé | **Moteur méthodo YAML** (étapes 1→6 sur ECU simulée) + **langage de conditions fermé** (prédicats sur `ToolResult`, pas de code arbitraire) + **état persistant/reprise** (JSON) + modes **Guidé/Libre** avec bascule sans perte d'état + **TUI Textual complète** (façade, même process). Remplit la surface méthodo/état MCP creuse en v0.3 (§5.2.1). | **validé auteur 2026-11-22** |
+| Périmètre v0.5 Web | **Approche 2 « carte pilotable + Libre »** : client Web `FastAPI` **même processus / même `Session`** que cœur+MCP ; **carte de surface d'attaque** (cytoscape.js) alimentée par une **projection pure** `build_surface(history)` exposée dans `state()` ; temps réel **SSE + POST** ; mode **Libre pilotable** (clic → `run_tool`) ; **`Origin.WEB`** + **approbation destructrice dans le Web** (hook `on_pending`, même autorité qu'en v0.4) ; bind `127.0.0.1` + **token** + validation `Origin`/`Host` (anti-CSRF/rebinding). **Guidé Web reporté** (AC-11 tenu pour Libre+destructif+carte, complété plus tard). (§5.8) | **validé auteur 2026-11-22** |
 | Interfaces | TUI (Textual) + Web (FastAPI + front soigné `frontend-design`) | choix utilisateur |
 | Phasage UI | TUI d'abord, Web juste après, même cœur | choix auteur |
 | Agent embarqué (C) | Extension v1.x/v2, = client MCP de plus | choix utilisateur |
@@ -584,8 +711,11 @@ v0.3  MCP + IA     Serveur MCP (outils + methodo + etat), auth token,
                    -> Critere : un modele local ET un frontiere pilotent une session (O6)
 v0.4  MODE GUIDE   Moteur de methodologie YAML, etapes 1 a 6, etat persistant, TUI
                    -> Critere : un debutant boucle un parcours CAN/UDS
-v0.5  MODE LIBRE   Carte surface d'attaque, suggestions, journalisation, Web
-                   -> Critere : bascule Guide <-> Libre sans perte d'etat
+v0.5  WEB + CARTE  Client Web (FastAPI, meme process), carte de surface d'attaque
+                   (cytoscape.js, projection build_surface), SSE+POST, Libre pilotable,
+                   Origin.WEB + approbation destructrice Web (§5.8)
+                   -> Critere : carte temps reel + action pilotee au clic + destructif
+                      approuve dans le Web ; guide Web reporte
 v1.0  RESTITUTION  Rapport de session exportable, doc + mode d'emploi, licence
                    -> Critere : rapport genere en fin de mission
 v1.x  EXT.         Automotive Ethernet (DoIP) consolide, Wi-Fi/BLE, agent embarque (C)
@@ -641,6 +771,9 @@ v2+   EXTENSIONS   CAN-FD, SOME/IP, reverse firmware, PwnDoc, sonde Pi avancee
 - [ ] Nom de code définitif (CARBON provisoire) — non bloquant.
 
 > **Statut : doc approuvé par l'auteur le 2026-11-19.** Socle v0.1 livré et mergé (PR #1).
+> v0.2 UDS + ECU simulé, v0.3 MCP, v0.4 Mode Guidé livrés et mergés dans `main`.
+> v0.5 (Web + carte, §5.8) : **Approche 2 validée par l'auteur le 2026-11-22**, exécution
+> autonome autorisée (priorité sécurité + qualité du code), livraison par PR vers `main`.
 > **Périmètre v0.2 (UDS, Option A) approuvé le 2026-11-20** (§5.6.1) ; Option C planifiée comme
 > jalon d'apprentissage ultérieur. v0.2 livré (PR #2).
 > **Périmètre v0.3 (MCP + IA branchable) approuvé le 2026-11-22** (§5.4.1) : 10 adaptateurs en
