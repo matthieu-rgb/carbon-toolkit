@@ -94,6 +94,7 @@ def serve(
         session = Session(
             channel=channel, interface=interface, journal_path=journal_path,
             approver=DenyingApprover(),
+            state_path=journal_path.with_suffix(".state.json"),
         )
         asyncio.run(build_mcp_server(session).run_stdio_async())
         return
@@ -110,6 +111,7 @@ def serve(
     queue = ApprovalQueue()
     session = Session(
         channel=channel, interface=interface, journal_path=journal_path, approver=queue,
+        state_path=journal_path.with_suffix(".state.json"),
     )
     threading.Thread(target=_console_loop, args=(queue,), daemon=True).start()
     print(f"CARBON MCP on http://{host}:{port}/mcp ; Bearer token file: {path}", flush=True)

@@ -180,6 +180,131 @@ Conséquence directe : l'avancement et la **position sur la carte** (EF-21, mode
 le **contrat de sortie structurée** des adaptateurs, pas sur du parsing libre. C'est pourquoi ce
 contrat (§5.3) est un livrable de premier plan, pas un détail.
 
+#### 5.2.1 Périmètre v0.4 — Mode Guidé (moteur YAML + état persistant + TUI, décision auteur 2026-11-22)
+
+La v0.4 **remplit** la surface « méthodologie/état » laissée creuse en v0.3 (§5.4.1) : un vrai moteur
+de méthodologie déterministe, une méthodo v1 en YAML couvrant les **étapes 1→6** (§7) jouable
+**sans matériel sur l'ECU simulée** (AC-07), les deux modes **Guidé/Libre** avec bascule sans perte
+d'état, et la **TUI Textual** par laquelle un débutant « boucle un parcours » (AC-04). Model-agnostic :
+tout marche **sans IA** (l'opérateur choisit) ; l'IA, si branchée via MCP, interprète et explique mais
+**ne redéfinit jamais la carte**.
+
+**Schéma YAML de l'arbre d'attaque.** Fichier déclaratif, versionné dans le dépôt (contribution
+externe, ENF-30). Une liste d'**étapes** ; chaque étape déclare :
+- `id` (stable), `title`, `objective` (texte pédagogique affiché) ;
+- `tool` : nom d'un **adaptateur du registre** + paramètres par défaut (le moteur ne contient aucun
+  outil — règle d'or ; il référence par nom) ; une étape purement informative (ex. « brancher
+  l'OBD-II / attacher `vcan0` ») peut n'avoir **aucun** `tool` et avancer sur acquittement ;
+- `expected` : texte « ce qu'on attend » ;
+- `conditions` : **prédicats machine-évaluables** sur le `ToolResult` (voir ci-dessous) qui, vrais,
+  rendent l'étape *satisfaite* ;
+- `next` : une ou plusieurs étapes candidates (ids).
+
+**Langage de conditions (décision — minimal, déclaratif, sûr, testable).** Pas de code arbitraire :
+une condition est un petit prédicat sur `ToolResult.to_dict()` parmi un jeu fermé —
+`ok` (booléen), `equals(path, valeur)`, `contains(path, valeur)` (listes/chaînes), `exists(path)`,
+`truthy(path)` — où `path` adresse `data.<clé>` (p. ex. `contains(data.supported, "0x27")`,
+`equals(data.cleared, true)`). Combinables en `all`/`any`. Le moteur évalue ces prédicats contre la
+**sortie structurée** de l'adaptateur (le contrat §5.3), jamais par parsing de texte libre.
+
+**Moteur (autorité d'avancement, en deux temps — reprend §5.2).** Après l'exécution d'une étape, il
+évalue les `conditions` des candidats `next` : si **une seule** branche est satisfaite → **auto-avance** ;
+si **plusieurs** ou **aucune** ne tranche → il **propose** les candidats et laisse l'**opérateur ou
+l'IA choisir** ; le choix est **journalisé**. L'état de progression est donc fiable et testable
+**sans IA**.
+
+**État persistant + reprise (EF-14, décision).** L'état de session — méthodo chargée, étape courante,
+historique (étapes franchies + `ToolResult` associés), mode courant — est sérialisé en **JSON sur
+disque** (à côté du journal), **repris** au redémarrage. La `Session` (v0.3) gagne cette intégration
+moteur ; `session_state()` (surface MCP) renvoie désormais la méthodo chargée + l'étape courante +
+les candidats au lieu de « libre/none ».
+
+**Deux modes et bascule (EF-21/22/24).** **Guidé** : le moteur tient le fil et impose l'ordre ;
+**Libre** : accès direct à tous les outils, le moteur **trace** la position sur la carte (§7) et
+**suggère** de façon non bloquante. Bascule **Guidé ↔ Libre sans perte d'état**.
+
+**Méthodo v1 (étapes 1→6) jouable sur l'ECU simulée.** 1 ACCÈS (attacher `vcan0`, informatif) →
+2 RECONNAISSANCE CAN (`can_sniff`/`can_dump`) → 3 DIAGNOSTIC UDS (`uds_scan`, `uds_session`) →
+4 DTC & DONNÉES (`uds_read_dtc`, `uds_read_did`, `uds_clear_dtc` **destructif**) → 5 SEED-KEY
+(`uds_security_access`) → 6 REJEU & INJECTION (`can_replay`, `can_inject` **destructifs**). Les
+étapes destructrices passent par le **garde-fou v0.3** (`pending-approval`).
+
+**TUI (Textual, décision interface §interface).** Client **fin** dans **le même processus** que la
+`Session`/serveur MCP (état partagé §5.4) : elle n'affiche et n'envoie que des actions. Elle montre
+l'étape courante (objectif, outil suggéré), exécute l'outil, affiche le **résultat structuré** et son
+interprétation, puis auto-avance ou présente les choix ; en Libre elle montre la **position sur la
+carte** et les suggestions ; les actions destructrices demandées **apparaissent pour approbation dans
+la TUI** (façade sur la file `pending-approval` de v0.3 — ce que le design visait §5.4). La TUI est
+une **façade** : toute la logique vit dans le moteur/cœur, écrite une seule fois (O7).
+
+**Précisions d'implémentation (levée d'ambiguïtés, relecture builder 2026-11-22) :**
+
+- **Contrat du moteur (lève une contradiction de ma 1re rédaction) — modèle unique.** Les
+  `conditions` d'une étape sont des **post-conditions sur SON PROPRE `ToolResult`** (l'étape a-t-elle
+  atteint son objectif ?). Le **choix de branche** se fait par un prédicat optionnel **`when`** porté
+  par chaque arête de `next`, évalué contre le **résultat qui vient d'être produit** : le moteur
+  avance vers le candidat dont le `when` est vrai (ou l'unique `next` sans `when`) ; si **0 ou >1**
+  `when` sont vrais → il **propose** et l'opérateur/IA **choisit** (journalisé). Une étape dont les
+  post-conditions échouent est « non satisfaite » : le moteur l'affiche et propose les candidats de
+  remédiation (ex. accès refusé `ok=False`+`data.nrc` → l'arête `when` qui matche route vers l'étape
+  seed-key). *Un seul moteur, pas deux.*
+- **Grammaire des conditions — fermée et plate.** `ok` (top-level) + `equals(path, v)` /
+  `contains(path, v)` / `exists(path)` / `truthy(path)`, combinables en `all`/`any`. `path` adresse
+  **un seul niveau sous `data`** (`data.<clé>`) — **pas d'indexation ni de JSONPath profond**. Les
+  champs-listes se testent par `truthy`/`exists`/`contains(scalaire)` (ex. `truthy(data.dtcs)` = « ≥1
+  DTC » ; `contains(data.supported, "0x27")` ; `equals(data.cleared, true)` ; `equals(data.unlocked,
+  true)`). Suffit aux étapes 1→6 ; trivial et sûr à évaluer.
+- **Approbation destructrice quand la TUI tourne (résout le conflit de threads v0.3).** La TUI tient
+  le terminal et sa propre boucle asyncio ; **sous TUI, le thread console stdin de v0.3 n'est PAS
+  démarré** — **la TUI est la surface d'approbation**. `ApprovalQueue` gagne un **hook de
+  notification** ; la TUI s'y abonne et présente une **modale** pour toute action `pending-approval`.
+  Nouvel **`Origin.TUI`** pour une action destructrice déclenchée **par l'humain dans la TUI** :
+  approuvée par la **modale TUI** (jamais `input()`, jamais la file de l'IA). Un serveur MCP HTTP
+  embarqué (optionnel, pour le pilotage IA) tourne **uvicorn dans un thread de fond** ; une action
+  destructrice venue de l'IA **apparaît dans la même modale TUI**. L'appel bloquant (`Event`) est
+  déporté sur un worker pendant que la modale tranche.
+- **Nouvelles actions (TUI + outils MCP).** `methodology_load(path)`, `mode_set(guided|libre)`,
+  `step_ack()` (acquitter une étape informative sans `tool`), `step_choose(step_id)` (trancher un
+  embranchement). Exposées comme **outils MCP** (pour l'IA) et touches/commandes TUI (pour l'humain).
+- **Guidé impose l'ordre ; Libre trace.** En **Guidé**, exécuter un outil qui n'est ni l'étape
+  courante ni un candidat est **refusé** (retour informatif, non destructif) — le moteur garde le
+  débutant sur les rails (§5.5 « impose l'ordre »). En **Libre**, tout outil passe ; le moteur
+  **trace** la position **au mieux** = l'étape de plus haut rang dont l'outil correspond au dernier
+  outil joué (indicatif, non autoritaire). Exécuter l'outil de l'étape courante déclenche
+  l'évaluation + auto-avance/proposition.
+- **Moteur ↔ Session / chemin unique.** Le moteur est un **composant porté par la `Session`** ;
+  `run_tool` **continue de passer par `execute_tool`** (chemin unique v0.3) puis **pousse** le
+  `ToolResult` au moteur (Guidé : évalue+avance ; Libre : trace). Le moteur **construit les kwargs de
+  `run()` de l'adaptateur** (donc étape 6 `can_inject` utilise `data`=octets, **pas** le `data_hex`
+  du wrapper MCP). Règle d'or : le moteur ne contient aucun outil (référence par nom via le registre).
+- **Paramètres d'étape & étape informative.** Une étape peut marquer un paramètre `prompt: true`
+  (saisi au **runtime** : formulaire TUI / argument MCP) vs valeur par défaut (indispensable pour
+  étape 6 `can_inject`, souvent pour `uds_read_did`). Une étape **sans `tool`** s'acquitte par
+  `step_ack` (événement journalisé) ; ses post-conditions sont vacueusement satisfaites et le choix de
+  `next` se fait par `when`/manuel.
+- **Persistance & reprise (EF-14).** Fichier **JSON** à côté du journal (`carbon-session.state.json`),
+  écrit par **remplacement atomique** à chaque transition : méthodo chargée + étape courante + mode +
+  historique (étapes franchies + `ToolResult`). La reprise restaure la **position de méthodologie,
+  pas l'état vivant de la cible** : l'ECU simulée (process séparé) a pu redémarrer/re-verrouiller — le
+  moteur **ne suppose pas** que les prérequis (déverrouillage) tiennent encore ; rejouer l'étape les
+  rétablit. (Distinct de `Session.history`, le tampon runtime plafonné.)
+- **Bascule sans perte d'état (EF-24).** `mode` est un **toggle runtime** (touche TUI + `mode_set`) ;
+  la bascule **conserve le pointeur d'étape verbatim** (pas de recalcul), donc pas de perte d'état ni
+  de ré-invocation du mapping indicatif.
+- **Portée Libre v0.4 vs v0.5.** v0.4 (TUI) = **position textuelle + suggestions non bloquantes**,
+  **pas** de carte visuelle ; AC-05 (« affiche la position et journalise ») est une cible **v0.4** en
+  forme textuelle. La **carte visuelle** et le **Web** restent v0.5.
+- **Tests TUI sans tête.** `App.run_test()` / `Pilot` (Textual) ; le harnais v0.4 monte **TUI +
+  Session + ApprovalQueue dans un seul process** et exerce la navigation, l'auto-avance **et ≥1
+  parcours d'approbation destructrice via la modale TUI**. (Pas de workflow GitHub Actions ajouté en
+  v0.4 — infra séparée ; les tests tournent via `pytest` comme aujourd'hui.)
+- **Validation YAML (ENF-30).** Chargement **fail-fast** : adaptateur `tool` inconnu, `next` pointant
+  un id absent, ou YAML malformé → erreur claire au chargement, pas en cours de parcours.
+
+**Hors périmètre v0.4** (pour éviter la dérive) : **Web** (v0.5), **rapport** de session (v1.0),
+**matériel OBD-II réel** (v0.4 tourne sur `vcan0`/ECU simulée ; le branchement réel est documenté,
+AC-12), Automotive Ethernet/DoIP, agent embarqué (ext. C).
+
 ### 5.3 Registre d'outils (adaptateurs)
 Chaque outil intégré est encapsulé par un **adaptateur** à interface uniforme (entrées validées,
 sortie structurée, code de retour, artefacts/captures). Déclaration **déclarative et documentée**
@@ -426,6 +551,7 @@ Le code sera écrit « proprement avec la sécurité appropriée » (demande de 
 | Transport MCP | HTTP localhost + token Bearer ; stdio optionnel | choix auteur (aligné Exegol) |
 | Périmètre MCP/IA v0.3 | **10 adaptateurs existants en outils MCP + surface état/session + ressources journal** ; méthodo creuse jusqu'à v0.4 (§5.4.1). SDK `mcp==2.3.0` (API `MCPServer`) épinglé/vérifié par test. O6 prouvé en CI par client MCP en mémoire. | **validé auteur 2026-11-22** |
 | Garde-fou destructif via MCP v0.3 | **File `pending-approval` bloquante** ; approbation **hors pipe MCP** (console serveur en mode HTTP+token) ; `--yes` ignoré pour origine MCP ; **stdio refuse le destructif** faute de canal humain (§5.4.1). | **validé auteur 2026-11-22** |
+| Périmètre v0.4 Mode Guidé | **Moteur méthodo YAML** (étapes 1→6 sur ECU simulée) + **langage de conditions fermé** (prédicats sur `ToolResult`, pas de code arbitraire) + **état persistant/reprise** (JSON) + modes **Guidé/Libre** avec bascule sans perte d'état + **TUI Textual complète** (façade, même process). Remplit la surface méthodo/état MCP creuse en v0.3 (§5.2.1). | **validé auteur 2026-11-22** |
 | Interfaces | TUI (Textual) + Web (FastAPI + front soigné `frontend-design`) | choix utilisateur |
 | Phasage UI | TUI d'abord, Web juste après, même cœur | choix auteur |
 | Agent embarqué (C) | Extension v1.x/v2, = client MCP de plus | choix utilisateur |
@@ -519,4 +645,9 @@ v2+   EXTENSIONS   CAN-FD, SOME/IP, reverse firmware, PwnDoc, sonde Pi avancee
 > jalon d'apprentissage ultérieur. v0.2 livré (PR #2).
 > **Périmètre v0.3 (MCP + IA branchable) approuvé le 2026-11-22** (§5.4.1) : 10 adaptateurs en
 > outils MCP, garde-fou destructif à file `pending-approval` approuvée hors pipe MCP, O6 prouvé par
-> client MCP en mémoire. Étape suivante : plan d'implémentation v0.3.
+> client MCP en mémoire. v0.3 livré (PR #4, base `main` propre).
+> **Périmètre v0.4 (Mode Guidé) approuvé le 2026-11-22** (§5.2.1) : moteur de méthodologie YAML
+> (étapes 1→6 sur ECU simulée), langage de conditions fermé sur `ToolResult`, état persistant +
+> reprise, modes **Guidé/Libre + bascule** (la logique des deux modes et la bascule EF-24 arrivent
+> en v0.4 côté moteur/TUI ; le **Web** et la **carte visuelle** de surface d'attaque restent en v0.5),
+> TUI Textual complète. Étape suivante : plan d'implémentation v0.4.
