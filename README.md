@@ -248,6 +248,10 @@ Posture de sécurité :
 
     bash scripts/smoke_web.sh                    # ou : docker run --rm carbon:0.5.0 smoke-web
 
-Sans navigateur : démarre l'ECU simulé et `carbon web` sur un canal virtuel,
-suit le lien d'amorçage avec un cookie jar, vérifie que `/api/state` est refusé
-sans cookie puis renvoie `surface` et `tools` avec, et affiche `WEB OK`.
+Sans navigateur ni curl : démarre `carbon web` sur un canal virtuel, suit le lien
+d'amorçage, vérifie que `/api/state` est refusé sans cookie puis renvoie
+`surface` et `tools` avec, que le lien est à usage unique et que le cookie Web
+n'ouvre pas `/mcp`, puis affiche `WEB OK`. Il prouve l'état de session servi,
+l'authentification par cookie et la forme de l'état ; les exécutions d'outils
+sur CAN sont couvertes par la suite de tests (bus virtuel non partagé entre
+processus, l'ECU simulé n'est donc pas lancé).
