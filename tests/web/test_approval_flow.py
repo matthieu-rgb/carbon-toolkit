@@ -49,7 +49,7 @@ def test_destructive_approval_roundtrip(live, ecu):
         t.join(10)
         assert box["r"]["ok"] is True and ecu._dtcs == []
         res = rd.wait_for("resolved")
-        assert res["id"] == ev["id"] and res["decision"] == "approve"
+        assert res["id"] == ev["id"] and res["decision"] == "approved"
     finally:
         rd.close()
 
@@ -98,3 +98,18 @@ def test_can_inject_requires_approval(live):
     live.post(f"/api/approvals/{p.id}", json={"decision": "deny"})
     t.join(10)
     assert box["r"]["ok"] is False
+
+
+def test_timeout_broadcasts_resolved(make_live, ecu):
+    lv = make_live(approval_timeout=0.5)
+    _unlock(lv)
+    rd = SseReader(lv)
+    try:
+        rd.wait_for("state")
+        r = lv.post("/api/tool/uds_clear_dtc", json={}).json()
+        assert r["ok"] is False
+        ap = rd.wait_for("approval")
+        res = rd.wait_for("resolved", pred=lambda d: d["id"] == ap["id"])
+        assert res["decision"] == "timeout"
+    finally:
+        rd.close()
