@@ -56,7 +56,7 @@ class Session:
     def load_methodology(self, source: str | Path) -> None:
         meth = load_methodology(source, known_tools=set(self.registry.names()))
         self.engine = Engine(meth)
-        self.methodology_ref = str(source)
+        self.methodology_ref = str(Path(source).resolve())
         self._persist()
 
     def set_mode(self, mode: str) -> None:

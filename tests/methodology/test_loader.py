@@ -19,10 +19,10 @@ steps:
     prompt_params: [target]
     expected: ok
     conditions:
-      - {op: exists, path: x}
+      - {exists: data.x}
     next:
       - to: b
-        when: {op: exists, path: x}
+        when: {exists: data.x}
       - to: b
   - id: b
     title: Info
@@ -39,8 +39,8 @@ def test_valid_loads():
     assert isinstance(a, Step)
     assert a.tool == "scan" and a.params == {"bus": "can0"}
     assert a.prompt_params == ["target"]
-    assert a.conditions == [{"op": "exists", "path": "x"}]
-    assert a.next == [Edge("b", {"op": "exists", "path": "x"}), Edge("b", None)]
+    assert a.conditions == [{"exists": "data.x"}]
+    assert a.next == [Edge("b", {"exists": "data.x"}), Edge("b", None)]
     assert b.tool is None and b.params == {} and b.prompt_params == []
     assert b.conditions == [] and b.next == []
 
@@ -92,3 +92,18 @@ def test_duplicate_id():
 def test_uses_safe_load():
     with pytest.raises(MethodologyError):
         load_methodology("start: !!python/object/apply:os.getcwd []\nsteps: []", known_tools=TOOLS)
+
+
+@pytest.mark.parametrize("where", ["conditions:\n      - {bogus: 1}", "next:\n      - to: a\n        when: {bogus: 1}"])
+def test_bogus_condition_op_fails_at_load(where):
+    doc = f"""
+start: a
+steps:
+  - id: a
+    title: A
+    objective: o
+    expected: e
+    {where}
+"""
+    with pytest.raises(MethodologyError, match="bogus"):
+        load_methodology(doc, known_tools=TOOLS)
