@@ -29,8 +29,13 @@ class PendingApproval:
 class ApprovalQueue:
     """Implements ``carbon.core.execute.Approver``."""
 
-    def __init__(self, timeout: float = 300.0) -> None:
+    def __init__(
+        self,
+        timeout: float = 300.0,
+        on_pending: Callable[[PendingApproval], None] | None = None,
+    ) -> None:
         self._timeout = timeout
+        self._on_pending = on_pending
         self._lock = threading.Lock()
         self._table: dict[str, PendingApproval] = {}
 
@@ -43,6 +48,10 @@ class ApprovalQueue:
                     aid = secrets.token_hex(2)
                 entry = PendingApproval(id=aid, tool=tool, params=params)
                 self._table[aid] = entry
+            # Called outside the lock so the callback may inspect/resolve the queue.
+            # A raising callback fails closed (DENIED via the except below) by design.
+            if self._on_pending is not None:
+                self._on_pending(entry)
             entry._event.wait(self._timeout)
             with self._lock:
                 # A decision posted right at expiry still wins (it was accepted).

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "carbon"
-version = "0.3.0"
+version = "0.4.0"
 description = "CARBON - containerized automotive pentest toolkit"
 requires-python = ">=3.11"
 license = { text = "GPL-3.0-or-later" }
@@ -16,6 +16,8 @@ dependencies = [
     "udsoncan==1.26.1",  # UDS (ISO 14229) client (UDS layer)
     "uvicorn==0.54.0",  # serves the HTTP MCP transport
     "mcp==2.3.0",  # MCP SDK (server + in-memory client for tests)
+    "PyYAML==6.0.4",  # methodology YAML (yaml.safe_load only)
+    "textual==8.2.8",  # TUI (guided/libre views)
 ]
 
 [project.scripts]
@@ -29,3 +31,6 @@ include = ["carbon*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.setuptools.package-data]
+"carbon.methodology.trees" = ["*.yaml"]
