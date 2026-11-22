@@ -160,6 +160,37 @@ def _build_emu_group() -> click.Group:
     return emu
 
 
+def _build_mcp_group() -> click.Group:
+    """`carbon mcp`: expose CARBON to an AI client over MCP."""
+
+    @click.group("mcp", help="Model Context Protocol server.")
+    def mcp():
+        pass
+
+    @mcp.command("serve", help="Serve CARBON over MCP (stdio or HTTP + Bearer token).")
+    @click.option("--transport", type=click.Choice(["stdio", "http"]), default="stdio",
+                  show_default=True)
+    @click.option("--host", default="127.0.0.1", show_default=True,
+                  help="HTTP bind address (loopback only).")
+    @click.option("--port", type=int, default=8777, show_default=True)
+    @click.pass_context
+    def serve_cmd(ctx, transport, host, port):
+        from carbon.mcp.transport import serve
+
+        g = ctx.obj
+        try:
+            serve(
+                transport=transport, channel=g["channel"], interface=g["interface"],
+                journal_path=g["journal"], host=host, port=port,
+            )
+        except ValueError as exc:
+            raise click.ClickException(str(exc))
+        except KeyboardInterrupt:
+            pass
+
+    return mcp
+
+
 def build_cli(registry: Registry | None = None) -> click.Group:
     registry = registry or build_registry()
 
@@ -178,6 +209,7 @@ def build_cli(registry: Registry | None = None) -> click.Group:
     for name in registry.names():
         group.add_command(_make_command(registry.get(name)))
     group.add_command(_build_emu_group())
+    group.add_command(_build_mcp_group())
     return group
 
 
