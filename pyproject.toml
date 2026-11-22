@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "carbon"
-version = "0.2.0"
+version = "0.3.0"
 description = "CARBON - containerized automotive pentest toolkit"
 requires-python = ">=3.11"
 license = { text = "GPL-3.0-or-later" }
@@ -14,6 +14,8 @@ dependencies = [
     "msgpack",  # msgpack: udp_multicast smoke bus
     "can-isotp==2.0.7",  # pure-Python ISO-TP transport (UDS layer)
     "udsoncan==1.26.1",  # UDS (ISO 14229) client (UDS layer)
+    "uvicorn==0.54.0",  # serves the HTTP MCP transport
+    "mcp==2.3.0",  # MCP SDK (server + in-memory client for tests)
 ]
 
 [project.scripts]
