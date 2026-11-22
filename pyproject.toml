@@ -34,3 +34,4 @@ testpaths = ["tests"]
 
 [tool.setuptools.package-data]
 "carbon.methodology.trees" = ["*.yaml"]
+"carbon.web.static" = ["*.html", "*.js", "*.css", "vendor/*"]

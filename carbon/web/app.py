@@ -18,7 +18,8 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.background import BackgroundTask
 from starlette.responses import HTMLResponse, JSONResponse, StreamingResponse
-from starlette.routing import Route
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
 
 from carbon.core.execute import Decision, Origin
 from carbon.core.session import Session
@@ -26,7 +27,7 @@ from carbon.mcp.approval import ApprovalQueue
 from carbon.web.events import Broker
 from carbon.web.security import WebGuardMiddleware
 
-_PLACEHOLDER = "<!doctype html><html><head><title>CARBON</title></head><body>CARBON web client</body></html>"
+_STATIC = Path(__file__).parent / "static"
 
 # name -> {body_field: (kind, required, run_tool_kwarg, choices)}; mirrors carbon.mcp.server.
 _P = lambda kind, req=False, kw=None, choices=None: (kind, req, kw, choices)  # noqa: E731
@@ -118,7 +119,8 @@ def create_web_runtime(*, channel: str, interface: str, journal_path: Path,
 def build_web_app(session: Session, broker: Broker, queue: ApprovalQueue,
                   token: str, port: int, *, heartbeat: float = 15.0) -> Starlette:
     async def index(request: Request):
-        return HTMLResponse(_PLACEHOLDER)
+        return HTMLResponse((_STATIC / "index.html").read_text(encoding="utf-8"),
+                            headers={"Cache-Control": "no-store"})
 
     async def state(request: Request):
         return JSONResponse(await run_in_threadpool(session.state))
@@ -195,4 +197,5 @@ def build_web_app(session: Session, broker: Broker, queue: ApprovalQueue,
         Route("/api/events", events, methods=["GET"]),
         Route("/api/approvals", approvals, methods=["GET"]),
         Route("/api/approvals/{id}", resolve, methods=["POST"]),
+        Mount("/static", app=StaticFiles(directory=_STATIC), name="static"),
     ], middleware=[Middleware(WebGuardMiddleware, token=token, port=port)])
