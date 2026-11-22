@@ -85,7 +85,7 @@ steps:
           - ok: true
           - truthy: "data.dtcs"
     next:
-      - to: effacer_dtc
+      - to: seed_key
         when:
           all:
             - ok: true
@@ -94,8 +94,9 @@ steps:
   - id: effacer_dtc
     title: "4b. Effacement des DTC (action destructrice)"
     objective: >
-      Effacer les DTC (ClearDiagnosticInformation, 0x14). Action destructrice :
-      elle passe par l'approbation humaine avant exécution.
+      Effacer les DTC (ClearDiagnosticInformation, 0x14) une fois le niveau de
+      sécurité déverrouillé (étape précédente). Action destructrice : elle passe
+      par l'approbation humaine avant exécution.
     tool: uds_clear_dtc
     expected: "DTC effacés (cleared = true)."
     conditions:
@@ -103,7 +104,7 @@ steps:
           - ok: true
           - equals: ["data.cleared", true]
     next:
-      - to: seed_key
+      - to: rejeu
         when:
           all:
             - ok: true
@@ -121,7 +122,7 @@ steps:
           - ok: true
           - equals: ["data.unlocked", true]
     next:
-      - to: rejeu
+      - to: effacer_dtc
         when:
           all:
             - ok: true
