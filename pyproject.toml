@@ -30,3 +30,6 @@ include = ["carbon*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.setuptools.package-data]
+"carbon.methodology.trees" = ["*.yaml"]

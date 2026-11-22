@@ -1,0 +1,134 @@
+# CARBON v1 methodology — parcours guidé CAN/UDS sur l'ECU simulée (sans matériel).
+# Déclaratif : chaque étape référence un adaptateur du registre par son nom ; les
+# conditions sont évaluées contre la sortie structurée (ToolResult). Aucun payload
+# d'exploit — des objectifs pédagogiques, des outils existants, des conditions.
+start: acces
+
+steps:
+  - id: acces
+    title: "1. Accès physique"
+    objective: >
+      Relier l'outil au bus. Sur banc sans matériel, CARBON attache le bus
+      virtuel `vcan0`. Sur véhicule réel, c'est la prise OBD-II. Valide cette
+      étape quand le bus est prêt.
+    expected: "Un bus CAN accessible (vcan0 en simulation)."
+    next:
+      - to: recon
+
+  - id: recon
+    title: "2. Reconnaissance CAN"
+    objective: >
+      Écouter le trafic du bus pour confirmer qu'il est vivant et repérer les
+      identifiants d'arbitrage qui circulent.
+    tool: can_sniff
+    expected: "Au moins une trame CAN observée."
+    conditions:
+      - truthy: "data.frames"
+    next:
+      - to: uds_scan
+        when:
+          truthy: "data.frames"
+
+  - id: uds_scan
+    title: "3a. Découverte des services UDS"
+    objective: >
+      Énumérer les services de diagnostic (SID) exposés par le calculateur, et
+      vérifier la présence de SecurityAccess (0x27).
+    tool: uds_scan
+    expected: "La liste des services supportés inclut 0x27 (SecurityAccess)."
+    conditions:
+      - contains: ["data.supported", "0x27"]
+    next:
+      - to: uds_session
+        when:
+          contains: ["data.supported", "0x27"]
+
+  - id: uds_session
+    title: "3b. Ouverture d'une session diagnostique étendue"
+    objective: >
+      Passer en session étendue, préalable aux services protégés (seed-key,
+      effacement de DTC).
+    tool: uds_session
+    params:
+      session: extended
+    expected: "Session active = extended."
+    conditions:
+      - equals: ["data.session", "extended"]
+    next:
+      - to: lire_dtc
+        when:
+          equals: ["data.session", "extended"]
+
+  - id: lire_dtc
+    title: "4a. Lecture des codes défaut (DTC)"
+    objective: >
+      Lire les DTC stockés par le calculateur pour établir l'état avant toute
+      action.
+    tool: uds_read_dtc
+    expected: "Au moins un DTC présent."
+    conditions:
+      - truthy: "data.dtcs"
+    next:
+      - to: effacer_dtc
+        when:
+          truthy: "data.dtcs"
+
+  - id: effacer_dtc
+    title: "4b. Effacement des DTC (action destructrice)"
+    objective: >
+      Effacer les DTC (ClearDiagnosticInformation, 0x14). Action destructrice :
+      elle passe par l'approbation humaine avant exécution.
+    tool: uds_clear_dtc
+    expected: "DTC effacés (cleared = true)."
+    conditions:
+      - equals: ["data.cleared", true]
+    next:
+      - to: seed_key
+        when:
+          equals: ["data.cleared", true]
+
+  - id: seed_key
+    title: "5. Accès sécurisé (seed-key)"
+    objective: >
+      Déverrouiller un niveau de sécurité via l'algorithme seed-key documenté,
+      pour atteindre les services protégés.
+    tool: uds_security_access
+    expected: "Niveau déverrouillé (unlocked = true)."
+    conditions:
+      - equals: ["data.unlocked", true]
+    next:
+      - to: rejeu
+        when:
+          equals: ["data.unlocked", true]
+
+  - id: rejeu
+    title: "6a. Rejeu de trafic (action destructrice)"
+    objective: >
+      Rejouer une capture de trames précédemment enregistrée pour valider un
+      impact. Action destructrice : approbation humaine requise. Fournis le
+      chemin de la capture à rejouer.
+    tool: can_replay
+    prompt_params:
+      - path
+    expected: "Les trames de la capture sont rejouées sur le bus."
+    conditions:
+      - truthy: "data.frames"
+    next:
+      - to: injection
+        when:
+          truthy: "data.frames"
+
+  - id: injection
+    title: "6b. Injection d'une trame forgée (action destructrice)"
+    objective: >
+      Forger et injecter une trame CAN unique pour observer la réaction du
+      calculateur. Action destructrice : approbation humaine requise. Fournis
+      l'identifiant d'arbitrage et les octets de charge utile.
+    tool: can_inject
+    prompt_params:
+      - arb_id
+      - data
+    expected: "La trame forgée est émise sur le bus."
+    conditions:
+      - exists: "data.arbitration_id"
+    next: []
