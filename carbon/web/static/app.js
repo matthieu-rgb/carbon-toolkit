@@ -294,18 +294,29 @@
     m.appendChild(el("div", "why", "This action was requested and will not run until you decide."));
     m.appendChild(el("pre", null, JSON.stringify(a.params, null, 2)));
     var row = el("div", "row");
-    row.appendChild(el("span", "q", "a approve / d deny"));
+    row.appendChild(el("span", "q", "a approve / d deny (while this dialog has focus)"));
     var deny = el("button", "danger", "Deny"), ok = el("button", "primary", "Approve");
     function decide(d) {
       deny.disabled = ok.disabled = true;
+      m._err.textContent = "";
       fetch("/api/approvals/" + encodeURIComponent(a.id), {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ decision: d })
-      }).then(function (r) { if (!r.ok) dismiss(a.id); }).catch(function () { deny.disabled = ok.disabled = false; });
+      }).then(function (r) {
+        if (r.ok || r.status === 409) dismiss(a.id); // resolved (by us or already)
+        else { deny.disabled = ok.disabled = false; m._err.textContent = "Decision not recorded (HTTP " + r.status + "). Still pending."; }
+      }).catch(function () { deny.disabled = ok.disabled = false; m._err.textContent = "Decision not sent. Still pending."; });
     }
     deny.onclick = function () { decide("deny"); };
     ok.onclick = function () { decide("approve"); };
-    m._decide = decide;
+    m._err = el("div", "err-line");
+    m.appendChild(m._err);
+    // Hotkeys only act while focus is inside this dialog; Escape never decides.
+    m.addEventListener("keydown", function (e) {
+      if (e.ctrlKey || e.metaKey || e.altKey || !m.contains(document.activeElement)) return;
+      if (e.key === "a") { decide("approve"); e.preventDefault(); }
+      else if (e.key === "d") { decide("deny"); e.preventDefault(); }
+    });
     row.appendChild(deny); row.appendChild(ok);
     m.appendChild(row);
     modals[a.id] = m;
@@ -321,12 +332,7 @@
     if (rest) { var b = rest.querySelector("button"); if (b) b.focus(); }
   }
   document.addEventListener("keydown", function (e) {
-    var top = $("modals").lastElementChild;
-    if (top && !e.ctrlKey && !e.metaKey) {
-      if (e.key === "a") { top._decide("approve"); e.preventDefault(); }
-      else if (e.key === "d" || e.key === "Escape") { top._decide("deny"); e.preventDefault(); }
-      return;
-    }
+    if ($("modals").lastElementChild) return; // modal open: only its own handler acts
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) {
       if (e.key === "Escape") e.target.blur();
       return;

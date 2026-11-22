@@ -65,3 +65,14 @@ def test_app_js_uses_api():
     js = (STATIC / "app.js").read_text()
     assert "/api/events" in js and "/api/tool/" in js and "/api/approvals/" in js
     assert "assume_yes" not in js
+
+
+def test_approval_hotkeys_scoped_to_modal_and_escape_inert():
+    js = (STATIC / "app.js").read_text()
+    # hotkeys live on the modal element, guarded by focus containment
+    assert 'm.addEventListener("keydown"' in js and "m.contains(document.activeElement)" in js
+    # no document-level handler may decide an approval, and Escape never denies
+    assert "_decide" not in js and "Escape\") {\n      top" not in js
+    assert 'e.key === "Escape") { top' not in js
+    # modal is dismissed only on success or 409
+    assert "r.ok || r.status === 409" in js
