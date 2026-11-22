@@ -24,18 +24,13 @@ from carbon.mcp.approval import ApprovalQueue, DenyingApprover, console_resolve
 from carbon.mcp.server import build_mcp_server
 
 
-def token_path() -> Path:
-    """Token file location: outside the repo, in the user's runtime/temp dir."""
+def write_token(token: str) -> Path:
+    """Write the token to a fresh, randomly named 0600 file (mkstemp: O_EXCL)."""
     base = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
-    return Path(base) / f"carbon-mcp-token-{os.getpid()}"
-
-
-def write_token(token: str, path: Path | None = None) -> Path:
-    path = path or token_path()
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd, name = tempfile.mkstemp(prefix="carbon-mcp-token-", dir=base)
     with os.fdopen(fd, "w") as fh:
         fh.write(token)
-    return path
+    return Path(name)
 
 
 def verify_token(header: str | None, token: str) -> bool:
@@ -56,21 +51,27 @@ class BearerAuthMiddleware:
         self._token = token
 
     async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] == "http":
-            headers = {k.lower(): v for k, v in scope["headers"]}
-            supplied = headers.get(b"authorization", b"").decode("latin-1")
-            if not verify_token(supplied, self._token):
-                body = b'{"error":"unauthorized"}'
-                await send({
-                    "type": "http.response.start", "status": 401,
-                    "headers": [
-                        (b"content-type", b"application/json"),
-                        (b"www-authenticate", b"Bearer"),
-                        (b"content-length", str(len(body)).encode()),
-                    ],
-                })
-                await send({"type": "http.response.body", "body": body})
-                return
+        if scope["type"] == "lifespan":
+            await self.app(scope, receive, send)
+            return
+        if scope["type"] != "http":  # websocket or anything else: never unauthenticated
+            if scope["type"] == "websocket":
+                await send({"type": "websocket.close", "code": 1008})
+            return
+        headers = {k.lower(): v for k, v in scope["headers"]}
+        supplied = headers.get(b"authorization", b"").decode("latin-1")
+        if not verify_token(supplied, self._token):
+            body = b'{"error":"unauthorized"}'
+            await send({
+                "type": "http.response.start", "status": 401,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"www-authenticate", b"Bearer"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            })
+            await send({"type": "http.response.body", "body": body})
+            return
         await self.app(scope, receive, send)
 
 
