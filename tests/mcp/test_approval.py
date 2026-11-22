@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
+import secrets
 import threading
 import time
 
@@ -70,23 +71,29 @@ def test_double_resolve_second_returns_false():
     assert result["d"] is Decision.APPROVED
 
 
-def test_resolve_after_timeout_returns_false():
-    q = ApprovalQueue(timeout=0.1)
-    seen = []
-    orig = q.request
+def test_resolve_after_timeout_returns_false(monkeypatch):
+    monkeypatch.setattr(secrets, "token_hex", lambda n: "abcd")
+    q = ApprovalQueue(timeout=0.05)
+    assert q.request("t", {}) is Decision.TIMEOUT
+    assert q.resolve("abcd", Decision.APPROVED) is False
 
-    def run():
-        seen.append(orig("t", {}))
 
-    t = threading.Thread(target=run)
-    t.start()
-    while not q.pending() and t.is_alive():
-        time.sleep(0)
-    pend = q.pending()
-    t.join(5)
-    assert seen == [Decision.TIMEOUT]
-    if pend:
-        assert q.resolve(pend[0].id, Decision.APPROVED) is False
+def test_request_never_raises_and_does_not_leak(monkeypatch):
+    q = ApprovalQueue(timeout=5)
+
+    def boom(self, timeout=None):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(threading.Event, "wait", boom)  # fails after registration
+    assert q.request("t", {}) is Decision.DENIED
+    assert q.pending() == []
+
+    def boom_id(n):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(secrets, "token_hex", boom_id)  # fails before registration
+    assert q.request("t", {}) is Decision.DENIED
+    assert q.pending() == []
 
 
 def test_denying_approver_denies():
