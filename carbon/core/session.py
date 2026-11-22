@@ -12,6 +12,7 @@ from carbon.core.execute import Approver, Origin, execute_tool
 from carbon.core.journal import Journal
 from carbon.core.registry_builder import build_registry
 from carbon.core.result import ToolResult
+from carbon.core.surface import build_surface
 from carbon.methodology.engine import Engine
 from carbon.methodology.loader import load_methodology
 from carbon.methodology.persistence import load_state, save_state
@@ -164,12 +165,17 @@ class Session:
         }
 
     def state(self) -> dict[str, Any]:
+        history = [r.to_dict() for r in self.history]
         return {
             "tools": self.registry.names(),
             "methodology": self._methodology_state(),
-            "history": [r.to_dict() for r in self.history],
+            "history": history,
             "channel": self.channel,
             "interface": self.interface,
+            "surface": build_surface(
+                history, channel=self.channel,
+                current_tool=next((h["tool"] for h in reversed(history)
+                                   if h["ok"]), None)),
         }
 
     def journal_text(self) -> str:
