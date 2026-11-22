@@ -16,6 +16,7 @@ dependencies = [
     "udsoncan==1.26.1",  # UDS (ISO 14229) client (UDS layer)
     "uvicorn==0.54.0",  # serves the HTTP MCP transport
     "mcp==2.3.0",  # MCP SDK (server + in-memory client for tests)
+    "PyYAML==6.0.4",  # methodology YAML (yaml.safe_load only)
 ]
 
 [project.scripts]
