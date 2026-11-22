@@ -47,3 +47,25 @@ def test_inject_prompts_for_arb_id_and_data():
     m = _load()
     inj = next(s for s in m.steps.values() if s.tool == "can_inject")
     assert {"arb_id", "data"} <= set(inj.prompt_params)
+
+
+def test_edge_guards_reject_failed_results():
+    """A negative response (ok=False) must NOT satisfy any forward edge guard,
+    even when a data field is populated (regression: uds_session)."""
+    from carbon.methodology.conditions import evaluate
+
+    m = _load()
+    # uds_session -> lire_dtc edge
+    sess = next(s for s in m.steps.values() if s.tool == "uds_session")
+    guard = sess.next[0].when
+    ok_result = {"tool": "uds_session", "ok": True, "data": {"session": "extended"}}
+    nrc_result = {"tool": "uds_session", "ok": False,
+                  "data": {"session": "extended", "nrc": "0x7f"}}
+    assert evaluate(guard, ok_result) is True
+    assert evaluate(guard, nrc_result) is False
+
+    # every forward edge guard conjoins ok:true -> all reject a failed result
+    for s in m.steps.values():
+        for e in s.next:
+            if e.when is not None:
+                assert evaluate(e.when, {"ok": False, "data": {}}) is False
