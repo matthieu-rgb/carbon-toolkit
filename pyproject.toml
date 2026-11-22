@@ -14,6 +14,7 @@ dependencies = [
     "msgpack",  # msgpack: udp_multicast smoke bus
     "can-isotp==2.0.7",  # pure-Python ISO-TP transport (UDS layer)
     "udsoncan==1.26.1",  # UDS (ISO 14229) client (UDS layer)
+    "mcp==2.3.0",  # MCP SDK (server + in-memory client for tests)
 ]
 
 [project.scripts]
