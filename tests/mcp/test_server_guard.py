@@ -11,7 +11,7 @@ import time
 import pytest
 from mcp import Client
 
-from carbon.core.execute import Decision
+from carbon.core.execute import Decision, Origin, execute_tool
 from carbon.core.session import Session
 from carbon.emu.ecu import SimulatedEcu
 from carbon.mcp.approval import ApprovalQueue, DenyingApprover
@@ -160,29 +160,34 @@ def test_stdio_mode_refuses_destructive(ecu, channel, tmp_path):
     assert ecu._dtcs
 
 
-def test_assume_yes_has_no_effect_over_mcp(ecu, channel, tmp_path):
-    # The MCP call surface exposes no --yes/assume_yes: passing one is rejected
-    # or ignored, and the destructive action is never executed without approval.
-    server = _server(channel, tmp_path, DenyingApprover())
-    _unlock(server)
-    for extra in ({"assume_yes": True}, {"yes": True}):
-        try:
-            r = _call(server, "uds_clear_dtc", extra)
-        except Exception:
-            continue  # rejected outright: fine
-        sc = r.structured_content
-        assert r.is_error or (sc and sc["ok"] is False)
-        assert ecu._dtcs
-    assert ecu._dtcs
-
-    queue = ApprovalQueue()
+def test_destructive_timeout_is_refused(ecu, channel, tmp_path):
+    queue = ApprovalQueue(timeout=0.2)
     server = _server(channel, tmp_path, queue)
     _unlock(server)
-    w = _Worker(server, "uds_clear_dtc", {"assume_yes": True})
-    if not w.done:
-        pend = _wait_pending(queue, w) if not w.done else None
-        if pend:
-            assert ecu._dtcs  # parked, not executed
-            queue.resolve(pend.id, Decision.DENIED)
-    w.join()
-    assert ecu._dtcs
+    before = list(ecu._dtcs)
+    assert before
+    r = _Worker(server, "uds_clear_dtc").join(timeout=10.0)  # nobody resolves it
+    sc = r.structured_content
+    assert sc["ok"] is False
+    assert "timeout" in sc["summary"].lower()
+    assert ecu._dtcs == before
+    entries = [e for e in _journal(tmp_path) if e["tool"] == "uds_clear_dtc"]
+    assert entries and entries[-1]["ok"] is False and entries[-1]["actor"] == "mcp"
+
+
+@pytest.mark.parametrize("approver_factory", [DenyingApprover, lambda: ApprovalQueue(timeout=0.2)])
+def test_assume_yes_has_no_effect_over_mcp(ecu, channel, tmp_path, approver_factory):
+    """Over origin=MCP, assume_yes never executes without an APPROVED decision."""
+    server = _server(channel, tmp_path, DenyingApprover())
+    _unlock(server)  # ECU unlocked: only the guard stands between call and clear
+    before = list(ecu._dtcs)
+    assert before
+    session = Session(channel=channel, interface="virtual",
+                      journal_path=tmp_path / "j2.jsonl")
+    adapter = session.registry.get("uds_clear_dtc")
+    params = {"channel": channel, "interface": "virtual"}
+    result = execute_tool(adapter, params, origin=Origin.MCP,
+                          journal=session.journal, assume_yes=True,
+                          approver=approver_factory())
+    assert result.ok is False
+    assert ecu._dtcs == before
