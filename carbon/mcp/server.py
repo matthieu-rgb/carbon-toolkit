@@ -32,8 +32,9 @@ def build_mcp_server(session: Session) -> MCPServer:
     @server.tool()
     def can_inject(arb_id: int, data_hex: str = "", extended: bool = False) -> dict[str, Any]:
         """Inject one CAN frame (data as hex string). DESTRUCTIVE: requires approval."""
+        # Hex decoding happens in the adapter so a malformed payload is a journaled failure.
         return sess.run_tool(
-            "can_inject", arb_id=arb_id, data=bytes.fromhex(data_hex), extended=extended
+            "can_inject", arb_id=arb_id, data=data_hex, extended=extended
         ).to_dict()
 
     @server.tool()

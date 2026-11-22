@@ -7,6 +7,7 @@ from typing import Any
 
 from carbon.core.execute import Approver, Origin, execute_tool
 from carbon.core.journal import Journal
+from carbon.core.registry_builder import build_registry
 from carbon.core.result import ToolResult
 
 
@@ -20,8 +21,6 @@ class Session:
         approver: Approver | None = None,
         history_limit: int = 50,
     ) -> None:
-        from carbon.cli import build_registry  # local import: avoid import cycles
-
         self.registry = build_registry()
         self.journal = Journal(journal_path)
         self.channel = channel

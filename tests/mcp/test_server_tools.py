@@ -99,3 +99,19 @@ def test_tool_schema_hides_transport_params(channel, tmp_path):
         props = by[name].input_schema.get("properties", {})
         assert not {"rxid", "txid", "channel", "interface"} & set(props)
     assert "did" in by["uds_read_did"].input_schema["properties"]
+
+
+@pytest.mark.parametrize("bad", ["zz", "0"])
+def test_can_inject_bad_hex_is_journaled_failure(channel, tmp_path, bad):
+    from carbon.core.execute import Decision
+
+    class Approve:
+        def request(self, tool, params):
+            return Decision.APPROVED
+
+    s = Session(channel=channel, interface="virtual", journal_path=tmp_path / "j.jsonl",
+                approver=Approve())
+    r = _drive(build_mcp_server(s), lambda c: c.call_tool("can_inject", {"arb_id": 0x123, "data_hex": bad}))
+    assert r.structured_content["ok"] is False
+    lines = [json.loads(x) for x in (tmp_path / "j.jsonl").read_text().splitlines()]
+    assert lines and lines[-1]["actor"] == "mcp" and "can_inject" in json.dumps(lines[-1])
