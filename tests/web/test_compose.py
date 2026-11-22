@@ -46,7 +46,26 @@ def test_mcp_route_still_requires_bearer(combined):
                    headers={"Authorization": "Bearer nope"})
     assert r.status_code == 401
     # Web unaffected by the MCP guard: no cookie -> its own guard answers
-    assert httpx.get(f"http://127.0.0.1:{port}/api/state").status_code in (401, 403)
+    assert httpx.get(f"http://127.0.0.1:{port}/api/state").status_code == 401
+
+
+def test_mcp_prefix_boundary_exact(combined):
+    port, *_ = combined
+    b = f"http://127.0.0.1:{port}"
+    # sub-path of /mcp -> MCP Bearer guard
+    r = httpx.get(f"{b}/mcp/anything")
+    assert r.status_code == 401 and r.headers.get("www-authenticate") == "Bearer"
+    # cookie must not satisfy MCP
+    r = httpx.post(f"{b}/mcp", content="{}", cookies={"carbon_web": WEB_TOK})
+    assert r.status_code == 401 and r.headers.get("www-authenticate") == "Bearer"
+    # look-alike prefixes go to the WEB guard, never MCP
+    for path in ("/mcpevil", "/mcp.x", "/mcp-x/y"):
+        r = httpx.get(f"{b}{path}")
+        assert r.status_code == 401
+        assert "www-authenticate" not in r.headers and r.headers.get("cache-control") == "no-store"
+        # with the web cookie it reaches the web app (404), proving it is not MCP
+        r = httpx.get(f"{b}{path}", cookies={"carbon_web": WEB_TOK})
+        assert r.status_code == 404
 
 
 def test_web_route_requires_cookie_not_bearer(combined):
@@ -77,6 +96,11 @@ def test_shared_session_web_and_mcp(combined):
 
     res = asyncio.run(go())
     assert not res.is_error
+    # MCP's view must equal the shared Session's (incl. the Web-run tool in history).
+    import json
+    mcp_state = res.structured_content or json.loads(res.content[0].text)
+    assert mcp_state == json.loads(json.dumps(session.state(), default=str))
+    assert "uds_scan" in json.dumps(mcp_state)
     assert session.approver is queue
 
 
