@@ -4,43 +4,18 @@ from __future__ import annotations
 
 import sys
 import threading
-from datetime import datetime, timezone
 from pathlib import Path
 
 import click
 
 from carbon.can.bus import BusError
-from carbon.core.confirm import authorize
+from carbon.core.execute import ActionRefused, Origin, execute_tool
 from carbon.core.journal import Journal, JournalError
 from carbon.core.registry import Registry
-from carbon.core.result import ToolResult
+from carbon.core.registry_builder import build_registry  # re-exported
 from carbon.emu.ecu import EcuConfig, SimulatedEcu
-from carbon.tools.can_dump import CanDump
-from carbon.tools.can_inject import CanInject
-from carbon.tools.can_replay import CanReplay
-from carbon.tools.can_sniff import CanSniff
-from carbon.tools.uds_clear_dtc import UdsClearDtc
-from carbon.tools.uds_read_did import UdsReadDid
-from carbon.tools.uds_read_dtc import UdsReadDtc
-from carbon.tools.uds_scan import UdsScan
-from carbon.tools.uds_security_access import UdsSecurityAccess
-from carbon.tools.uds_session import UdsSession
-from carbon.uds.connection import UdsError
 
 DEFAULT_JOURNAL = "carbon-session.jsonl"  # relative to the current directory
-ACTOR = "cli"
-
-
-def build_registry() -> Registry:
-    """Single place where adapters are registered."""
-    registry = Registry()
-    for adapter in (
-        CanSniff(), CanDump(), CanReplay(), CanInject(),
-        UdsScan(), UdsSession(), UdsSecurityAccess(),
-        UdsReadDid(), UdsReadDtc(), UdsClearDtc(),
-    ):
-        registry.register(adapter)
-    return registry
 
 
 def _hex_bytes(_ctx, _param, value: str | None) -> bytes:
@@ -106,31 +81,17 @@ def _make_command(adapter) -> click.Command:
     @click.pass_context
     def callback(ctx: click.Context, **params):
         g = ctx.obj
-        if not authorize(
-            adapter, assume_yes=g["yes"], interactive=sys.stdin.isatty()
-        ):
+        run_params = {"channel": g["channel"], "interface": g["interface"], **params}
+        try:
+            result = execute_tool(
+                adapter, run_params, origin=Origin.CLI, journal=Journal(g["journal"]),
+                assume_yes=g["yes"], interactive=sys.stdin.isatty(),
+            )
+        except ActionRefused:
+            # Refusals are intentionally not journaled: nothing touched the bus.
             raise click.ClickException(
                 f"{adapter.name} is destructive: refused (use --yes to authorize)"
             )
-        # Refusals above are intentionally not journaled: nothing touched the bus.
-        run_params = {"channel": g["channel"], "interface": g["interface"], **params}
-        started = datetime.now(timezone.utc)
-        journal = Journal(g["journal"])
-        try:
-            result = adapter.run(**run_params)
-        except (BusError, UdsError, ValueError, OSError) as exc:
-            # Failed/partial runs may already have hit the bus: journal the outcome.
-            failure = ToolResult(
-                tool=adapter.name, ok=False, summary=f"failed: {exc}",
-                started_at=started, ended_at=datetime.now(timezone.utc),
-            )
-            try:
-                journal.record(failure, _jsonable(run_params), ACTOR)
-            except JournalError as jexc:
-                raise click.ClickException(f"{exc} (additionally, {jexc})")
-            raise click.ClickException(str(exc))
-        try:
-            journal.record(result, _jsonable(run_params), ACTOR)
         except JournalError as exc:
             raise click.ClickException(f"{adapter.name} executed but {exc}")
         click.echo(result.summary)
@@ -143,10 +104,6 @@ def _make_command(adapter) -> click.Command:
     return click.Command(
         adapter.name, params=list(_PARAMS.get(adapter.name, [])), callback=callback, help=doc
     )
-
-
-def _jsonable(params: dict) -> dict:
-    return {k: (v.hex() if isinstance(v, bytes) else v) for k, v in params.items()}
 
 
 def _build_emu_group() -> click.Group:
@@ -182,6 +139,37 @@ def _build_emu_group() -> click.Group:
     return emu
 
 
+def _build_mcp_group() -> click.Group:
+    """`carbon mcp`: expose CARBON to an AI client over MCP."""
+
+    @click.group("mcp", help="Model Context Protocol server.")
+    def mcp():
+        pass
+
+    @mcp.command("serve", help="Serve CARBON over MCP (stdio or HTTP + Bearer token).")
+    @click.option("--transport", type=click.Choice(["stdio", "http"]), default="stdio",
+                  show_default=True)
+    @click.option("--host", default="127.0.0.1", show_default=True,
+                  help="HTTP bind address (loopback only).")
+    @click.option("--port", type=int, default=8777, show_default=True)
+    @click.pass_context
+    def serve_cmd(ctx, transport, host, port):
+        from carbon.mcp.transport import serve
+
+        g = ctx.obj
+        try:
+            serve(
+                transport=transport, channel=g["channel"], interface=g["interface"],
+                journal_path=g["journal"], host=host, port=port,
+            )
+        except ValueError as exc:
+            raise click.ClickException(str(exc))
+        except KeyboardInterrupt:
+            pass
+
+    return mcp
+
+
 def build_cli(registry: Registry | None = None) -> click.Group:
     registry = registry or build_registry()
 
@@ -200,6 +188,7 @@ def build_cli(registry: Registry | None = None) -> click.Group:
     for name in registry.names():
         group.add_command(_make_command(registry.get(name)))
     group.add_command(_build_emu_group())
+    group.add_command(_build_mcp_group())
     return group
 
 

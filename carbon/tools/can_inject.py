@@ -9,7 +9,9 @@ from carbon.core.adapter import Adapter
 from carbon.core.result import ToolResult
 
 
-def _validate(arb_id: int, data: list[int] | bytes, extended: bool) -> bytes:
+def _validate(arb_id: int, data: list[int] | bytes | str, extended: bool) -> bytes:
+    if isinstance(data, str):  # hex string (MCP): bad hex -> ValueError -> journaled failure
+        data = bytes.fromhex(data)
     max_id = 0x1FFFFFFF if extended else 0x7FF
     if not isinstance(arb_id, int) or isinstance(arb_id, bool) or not 0 <= arb_id <= max_id:
         raise ValueError(f"arbitration id {arb_id!r} out of range 0..{max_id:#x}")
@@ -30,7 +32,7 @@ class CanInject(Adapter):
         channel: str = "vcan0",
         interface: str = "socketcan",
         arb_id: int = 0,
-        data: list[int] | bytes = (),
+        data: list[int] | bytes | str = (),
         extended: bool = False,
         **_: object,
     ) -> ToolResult:
