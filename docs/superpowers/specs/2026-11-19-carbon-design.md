@@ -214,6 +214,47 @@ UDS, gère sessions, DTC (lecture/effacement) et une routine **seed-key d'exempl
 support de test de la couche UDS et la condition pour tenir AC-03 et AC-07 ensemble. Livré en
 **v0.2** (voir roadmap). ICSim reste utilisé pour les labs de trafic CAN (EF-15).
 
+#### 5.6.1 Périmètre v0.2 — « minimal mais réaliste » (Option A, décision auteur 2026-11-20)
+
+Deux niveaux de réalisme ont été envisagés pour l'ECU simulée et la couche UDS : **A** (une ECU,
+chemins nominaux **+** codes de réponse négative corrects **+** verrouillage par session/sécurité,
+un seed-key d'exemple) et **C** (parc multi-ECU, niveaux de sécurité multiples, DID verrouillés
+étendus, timing TesterPresent). **Décision : A pour v0.2** ; **C devient un jalon d'apprentissage
+ultérieur** (progression pédagogique : A pour comprendre le dialogue, C pour s'entraîner sur un
+parc plus fidèle — voir roadmap). La raison du choix de A : c'est le minimum pour que **sessions et
+seed-key aient un sens réel** (un service réellement refusé tant qu'on n'est pas déverrouillé),
+sans la sur-ingénierie d'un parc complet.
+
+**Décisions de « comment » (calls auteur, à défaut de contre-indication) :**
+
+- **Transport & client UDS** : côté *client* (adaptateurs CARBON), s'appuyer sur `can-isotp`
+  (transport ISO 15765-2) + `udsoncan` (client UDS ISO 14229) — on **n'implémente pas** le protocole
+  à la main. Côté *ECU simulée*, un **serveur maison** ISO-TP/UDS léger (udsoncan ne fournit pas de
+  serveur), construit au-dessus de `can-isotp`. La règle d'or tient : les adaptateurs *enveloppent*
+  la lib, l'ECU simulée est un **outil à part**.
+- **Services UDS couverts (client + ECU)** :
+  - `0x10` DiagnosticSessionControl — sessions *default* (`0x01`) / *extended* (`0x03`).
+  - `0x3E` TesterPresent — maintien de session.
+  - `0x27` SecurityAccess — requestSeed / sendKey, **un** niveau de sécurité.
+  - `0x22` ReadDataByIdentifier — quelques DID, dont **un verrouillé** derrière la sécurité.
+  - `0x19` ReadDTCInformation — lecture des DTC (`reportDTCByStatusMask`, sous-fonction `0x02`).
+  - `0x14` ClearDiagnosticInformation — effacement DTC ; **action destructrice** → passe par le
+    garde-fou `authorize` (comme inject/replay en v0.1).
+  - **Scanner UDS** (`uds_scan`) — balaye les SID, distingue *supporté* / *NRC serviceNotSupported*
+    (`0x11`), restitue la surface diagnostic.
+- **Verrouillage (ce qui donne du sens au seed-key)** : la session *extended* est requise pour
+  SecurityAccess (sinon NRC) ; le **DID protégé** et **ClearDTC** ne répondent qu'une fois le
+  seed-key validé, sinon NRC *securityAccessDenied* (`0x33`) / *conditionsNotCorrect* (`0x22`).
+  L'ECU renvoie les **NRC corrects** partout (service non supporté, sous-fonction invalide, séquence
+  erronée, accès refusé).
+- **Seed-key d'exemple (documenté, pas de la vraie crypto)** : l'ECU tire un seed 32 bits ; la clé
+  attendue est une transformation **déterministe et documentée** (ex. `key = (seed XOR 0xA5A5A5A5)`
+  avec rotation fixe), écrite noir sur blanc dans la doc pour que le débutant la reproduise. Branchée
+  dans le framework seed-key enfichable (§8) comme algo de référence.
+- **Adressage** : CAN 11-bit, **une** ECU — requête `0x7E0`, réponse `0x7E8` (convention OBD-II).
+- **Sans matériel** : tout tourne sur `vcan0`. L'ECU simulée est un processus/thread attaché au même
+  bus virtuel que les adaptateurs client (tient AC-07).
+
 ### 5.7 Connectivité physique au véhicule et antennes (demande explicite)
 CARBON doit pouvoir se **brancher sur un vrai véhicule** et exploiter les **antennes** de
 l'opérateur. La couche d'accès matériel couvre donc, par passthrough dans le conteneur :
@@ -295,6 +336,8 @@ Le code sera écrit « proprement avec la sécurité appropriée » (demande de 
 | Automotive Ethernet | DoIP remonté dans le périmètre (SOME/IP extension) | choix utilisateur |
 | Seed-key v1 | **Framework seed-key enfichable + 1-2 algos d'exemple documentés** (pas de couverture OEM large, souvent propriétaire) ; l'ECU simulé embarque une routine correspondante pour les tests | choix auteur |
 | ECU simulé | Répondeur ISO-TP/UDS embarqué (§5.6), livré v0.2 | choix auteur |
+| Périmètre UDS v0.2 | **Option A** : 1 ECU, NRC corrects, verrouillage session/sécurité, 1 seed-key d'exemple (§5.6.1). **Option C** (parc multi-ECU) = jalon d'apprentissage ultérieur. | **validé auteur 2026-11-20** |
+| Libs UDS v0.2 | Client : `can-isotp` + `udsoncan` (on enveloppe, on ne réécrit pas). ECU simulée : serveur ISO-TP/UDS maison sur `can-isotp`. | choix auteur |
 | Distribution | **Image multi-arch préconstruite et signée publiée sur un registre (ex : GHCR)** = chemin d'install supporté, piloté par le wrapper CLI (tient AC-01 < 5 min) ; build local = chemin dev. **Le premier publish public est bloqué par l'audit des licences amont** (redistribution). | choix auteur |
 | Licence | **GPLv3** (copyleft, compat. intégration GPL amont) | **validé auteur** (audit licences amont à faire avant 1er publish) |
 | Portée offline | Air-gap = **config supportée**, pas une exigence dure v1 ; model-agnostic garantit l'offline via client local (Ollama) | **validé auteur** |
@@ -309,8 +352,11 @@ v0.1  SOCLE        Dockerfile multi-arch, acces CAN (can0/vcan0),
                    coeur minimal + registre d'outils, CLI, can-utils + Scapy
                    -> Critere : capture et rejeu CAN sur vcan0
 v0.2  UDS          ISO-TP, scan UDS, DTC, seed-key documente,
-                   + ECU SIMULE (repondeur ISO-TP/UDS, §5.6)
+                   + ECU SIMULE (repondeur ISO-TP/UDS, §5.6) -- Option A (§5.6.1)
                    -> Critere : dialogue UDS complet sur ECU simule (sans materiel)
+v0.2+ LAB UDS      Option C (apprentissage) : parc multi-ECU, niveaux de securite
+                   multiples, DID verrouilles etendus, timing TesterPresent
+                   -> Critere : parcours UDS sur plusieurs ECU a adresses distinctes
 v0.3  MCP + IA     Serveur MCP (outils + methodo + etat), auth token,
                    confirmation actions destructrices
                    -> Critere : un modele local ET un frontiere pilotent une session (O6)
@@ -372,4 +418,6 @@ v2+   EXTENSIONS   CAN-FD, SOME/IP, reverse firmware, PwnDoc, sonde Pi avancee
 - [x] Accès CAN : **`python-can`** (validé).
 - [ ] Nom de code définitif (CARBON provisoire) — non bloquant.
 
-> **Statut : doc approuvé par l'auteur le 2026-11-19.** Étape suivante : plan d'implémentation.
+> **Statut : doc approuvé par l'auteur le 2026-11-19.** Socle v0.1 livré et mergé (PR #1).
+> **Périmètre v0.2 (UDS, Option A) approuvé le 2026-11-20** (§5.6.1) ; Option C planifiée comme
+> jalon d'apprentissage ultérieur. Étape suivante : plan d'implémentation v0.2.
