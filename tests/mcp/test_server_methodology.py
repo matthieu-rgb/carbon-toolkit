@@ -86,14 +86,10 @@ def test_step_choose_resolves_candidate(channel, tmp_path):
     _call(server, "methodology_load", {"path": str(V1)})
     _call(server, "step_ack")
     m = _meth(server)
-    # find a step with candidates by walking choose on whatever recon offers
-    cands = [c["id"] for c in m["candidates"]]
-    if cands:
-        r = _call(server, "step_choose", {"step_id": cands[0]})
-        assert r.structured_content["methodology"]["current"]["id"] == cands[0]
-    else:
-        bad = _call(server, "step_choose", {"step_id": "nope"})
-        assert bad.is_error
+    assert m["current"]["id"] == "recon"
+    assert [c["id"] for c in m["candidates"]] == ["uds_scan"]
+    r = _call(server, "step_choose", {"step_id": "uds_scan"})
+    assert r.structured_content["methodology"]["current"]["id"] == "uds_scan"
 
 
 def test_bad_input_is_mcp_error(channel, tmp_path):

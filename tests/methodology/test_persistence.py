@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import os
 
 import pytest
@@ -57,7 +58,7 @@ def test_atomic_write_uses_replace(tmp_path, monkeypatch):
     def spy(src, dst):
         calls.append((src, dst))
         # at replace time the temp holds complete JSON; target not yet new
-        assert json.loads(open(src).read())["methodology_ref"] == "m"
+        assert json.loads(Path(src).read_text())["methodology_ref"] == "m"
         return real(src, dst)
 
     monkeypatch.setattr(persistence.os, "replace", spy)

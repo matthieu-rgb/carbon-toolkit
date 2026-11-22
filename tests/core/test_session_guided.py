@@ -150,3 +150,25 @@ def test_persist_and_resume_round_trip(ecu, channel, tmp_path):
     assert r.state()["methodology"]["current"]["id"] == "uds_session"
     assert r.journal_text() == "" and len(s.journal_text()) == before  # no ECU traffic
     assert r.engine.history == s.engine.history
+
+
+def test_cli_open_guided_session_fresh_then_resume(channel, tmp_path):
+    from carbon.cli import open_guided_session
+
+    jp = tmp_path / "j.jsonl"
+    sp = jp.with_suffix(".state.json")
+    assert not sp.exists()
+    s = open_guided_session(Session, TREE, channel=channel, interface="virtual",
+                            journal_path=jp)  # fresh: persists to <journal>.state.json
+    assert s.engine.current_id == "acces"
+    s.step_ack()
+    s.step_choose("uds_scan")
+    s.set_mode("libre")
+    assert sp.exists()
+
+    r = open_guided_session(Session, TREE, channel=channel, interface="virtual",
+                            journal_path=jp)  # state exists: resumed, not fresh
+    assert r.engine.current_id == "uds_scan"
+    assert r.mode == "libre"
+    assert r.state_path == sp
+    assert r.engine.history == s.engine.history
