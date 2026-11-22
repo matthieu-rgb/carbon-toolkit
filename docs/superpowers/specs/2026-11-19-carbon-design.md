@@ -204,7 +204,7 @@ La v0.3 livre le **découplage** promis par l'approche B : n'importe quel client
 sans qu'aucun modèle ne soit embarqué. Elle est volontairement cadrée pour un socle testable et
 indépendant, **avant** le moteur de méthodologie YAML (v0.4) et la TUI/Web (v0.4/v0.5).
 
-**SDK & libs.** SDK MCP Python officiel (`mcp`, API **FastMCP**), **épinglé** et vérifié par test
+**SDK & libs.** SDK MCP Python officiel (`mcp`, épinglé **`mcp==2.3.0`** ; API 2.x `MCPServer` — `FastMCP` était le nom 1.x), vérifié par test
 comme on l'a fait pour `udsoncan`/`can-isotp` (ne jamais supposer une API ; l'implémenteur inspecte
 la version installée, l'épingle, et prouve par test). On **enveloppe** le SDK, on ne le réécrit pas
 (règle d'or). Le serveur MCP ne contient aucune méthodologie et n'appelle les outils **que** par le
@@ -424,7 +424,7 @@ Le code sera écrit « proprement avec la sécurité appropriée » (demande de 
 | Langage/stack | Python (`python-can`, Scapy, `udsoncan`, SDK MCP Python, Textual) | choix auteur |
 | Moteur méthodo | Déclaratif YAML | choix auteur (tranche §11 exigences) |
 | Transport MCP | HTTP localhost + token Bearer ; stdio optionnel | choix auteur (aligné Exegol) |
-| Périmètre MCP/IA v0.3 | **10 adaptateurs existants en outils MCP + surface état/session + ressources journal** ; méthodo creuse jusqu'à v0.4 (§5.4.1). SDK **FastMCP** épinglé/vérifié par test. O6 prouvé en CI par client MCP en mémoire. | **validé auteur 2026-11-22** |
+| Périmètre MCP/IA v0.3 | **10 adaptateurs existants en outils MCP + surface état/session + ressources journal** ; méthodo creuse jusqu'à v0.4 (§5.4.1). SDK `mcp==2.3.0` (API `MCPServer`) épinglé/vérifié par test. O6 prouvé en CI par client MCP en mémoire. | **validé auteur 2026-11-22** |
 | Garde-fou destructif via MCP v0.3 | **File `pending-approval` bloquante** ; approbation **hors pipe MCP** (console serveur en mode HTTP+token) ; `--yes` ignoré pour origine MCP ; **stdio refuse le destructif** faute de canal humain (§5.4.1). | **validé auteur 2026-11-22** |
 | Interfaces | TUI (Textual) + Web (FastAPI + front soigné `frontend-design`) | choix utilisateur |
 | Phasage UI | TUI d'abord, Web juste après, même cœur | choix auteur |
