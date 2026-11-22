@@ -49,6 +49,7 @@ class ApprovalQueue:
                 entry = PendingApproval(id=aid, tool=tool, params=params)
                 self._table[aid] = entry
             # Called outside the lock so the callback may inspect/resolve the queue.
+            # A raising callback fails closed (DENIED via the except below) by design.
             if self._on_pending is not None:
                 self._on_pending(entry)
             entry._event.wait(self._timeout)
