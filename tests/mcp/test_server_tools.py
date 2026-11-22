@@ -52,7 +52,8 @@ def test_lists_all_tools(channel, tmp_path):
         return (await c.list_tools()).tools
 
     tools = _drive(_server(channel, tmp_path), go)
-    assert {t.name for t in tools} == TOOLS | {"session_state"}
+    assert {t.name for t in tools} == TOOLS | {
+        "session_state", "methodology_load", "mode_set", "step_ack", "step_choose"}
     by = {t.name: t for t in tools}
     for name in DESTRUCTIVE:
         assert "destructive" in (by[name].description or "").lower()
