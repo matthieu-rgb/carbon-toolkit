@@ -170,6 +170,34 @@ def _build_mcp_group() -> click.Group:
     return mcp
 
 
+def _build_tui_command() -> click.Command:
+    """`carbon tui`: Textual guided/libre UI over one in-process Session."""
+
+    @click.command("tui", help="Interactive guided/libre terminal UI.")
+    @click.option("--methodology", "methodology", required=True,
+                  type=click.Path(exists=True, dir_okay=False, path_type=Path),
+                  help="Methodology YAML to walk.")
+    @click.pass_context
+    def tui_cmd(ctx, methodology):
+        from carbon.core.session import Session
+        from carbon.mcp.approval import ApprovalQueue
+        from carbon.tui import CarbonApp
+
+        g = ctx.obj
+        session = Session(channel=g["channel"], interface=g["interface"],
+                          journal_path=g["journal"])
+        try:
+            session.load_methodology(methodology)
+        except Exception as exc:
+            raise click.ClickException(str(exc))
+        app = CarbonApp(session)
+        # Approvals surface in the TUI modal; no stdin console thread under a TUI.
+        app.queue = session.approver = ApprovalQueue(on_pending=app.on_pending)
+        app.run()
+
+    return tui_cmd
+
+
 def build_cli(registry: Registry | None = None) -> click.Group:
     registry = registry or build_registry()
 
@@ -189,6 +217,7 @@ def build_cli(registry: Registry | None = None) -> click.Group:
         group.add_command(_make_command(registry.get(name)))
     group.add_command(_build_emu_group())
     group.add_command(_build_mcp_group())
+    group.add_command(_build_tui_command())
     return group
 
 
