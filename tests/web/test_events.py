@@ -40,3 +40,23 @@ def test_publish_never_blocks_on_full_queue():
         assert time.monotonic() - t < 1
         got = [sub.get(timeout=0.1)["i"] for _ in range(4)]
         assert got == [96, 97, 98, 99]  # drop-oldest
+
+
+def test_registered_on_subscribe_before_enter():
+    b = Broker()
+    sub = b.subscribe()
+    b.publish({"n": 1})  # before entering the with block
+    with sub:
+        assert sub.get(timeout=1) == {"n": 1}
+    sub.unsubscribe()  # idempotent
+    sub.unsubscribe()
+
+
+def test_maxsize_clamped_stays_bounded():
+    b = Broker(maxsize=0)
+    with b.subscribe() as sub:
+        for i in range(10):
+            b.publish({"i": i})
+        assert sub.get(timeout=0.1) == {"i": 9}
+        with pytest.raises(queue.Empty):
+            sub.get(timeout=0.05)
