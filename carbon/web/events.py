@@ -37,7 +37,6 @@ class Subscription:
                 pass  # lost a race; drop the event
 
     def __enter__(self) -> "Subscription":
-        self._broker._add(self)
         return self
 
     def __exit__(self, *exc) -> None:
@@ -46,14 +45,16 @@ class Subscription:
 
 class Broker:
     def __init__(self, maxsize: int = 256) -> None:
-        self._maxsize = maxsize
+        self._maxsize = max(1, maxsize)  # 0/negative would be unbounded
         self._lock = threading.Lock()
         self._subs: set[Subscription] = set()
 
     def subscribe(self) -> Subscription:
-        """Create a subscription; it registers on ``__enter__`` (or via
-        ``with``). Use as ``with broker.subscribe() as sub:``."""
-        return Subscription(self, self._maxsize)
+        """Create and register a subscription immediately (no missed events).
+        Usable as ``with broker.subscribe() as sub:``; exit unsubscribes."""
+        sub = Subscription(self, self._maxsize)
+        self._add(sub)
+        return sub
 
     def _add(self, sub: Subscription) -> None:
         with self._lock:
