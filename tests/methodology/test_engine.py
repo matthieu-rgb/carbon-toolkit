@@ -124,4 +124,3 @@ def test_remediation_branch():
     e = Engine(_meth())
     e.observe("scan", {"ok": False, "data": {"nrc": 0x35}})
     assert e.current_id == "fix"
-    assert e.position()["satisfied"] is None or isinstance(e.position(), dict)

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import yaml
 
+from carbon.methodology.conditions import evaluate
 from carbon.methodology.schema import Edge, Methodology, Step
 
 
@@ -44,6 +45,13 @@ def _opt(d: dict, key: str, typ: type, default, where: str):
     return v
 
 
+def _check_cond(cond: dict, where: str) -> None:
+    try:
+        evaluate(cond, {})
+    except ValueError as e:
+        raise MethodologyError(f"{where}: {e}") from e
+
+
 def load_methodology(source: str | Path, *, known_tools: set[str]) -> Methodology:
     try:
         doc = yaml.safe_load(_read(source))
@@ -74,10 +82,14 @@ def load_methodology(source: str | Path, *, known_tools: set[str]) -> Methodolog
             when = re_.get("when")
             if when is not None and not isinstance(when, dict):
                 raise MethodologyError(f"{where}: next[{j}].when must be a mapping")
+            if when is not None:
+                _check_cond(when, f"{where} next[{j}].when")
             edges.append(Edge(_req(re_, "to", str, f"{where} next[{j}]"), when))
         conds = _opt(rs, "conditions", list, [], where)
         if not all(isinstance(c, dict) for c in conds):
             raise MethodologyError(f"{where}: 'conditions' entries must be mappings")
+        for c in conds:
+            _check_cond(c, f"{where} conditions")
         steps[sid] = Step(
             id=sid,
             title=_req(rs, "title", str, where),
