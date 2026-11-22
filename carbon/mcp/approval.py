@@ -35,6 +35,7 @@ class ApprovalQueue:
         self._table: dict[str, PendingApproval] = {}
 
     def request(self, tool: str, params: dict) -> Decision:
+        aid: str | None = None
         try:
             with self._lock:
                 aid = secrets.token_hex(2)
@@ -44,11 +45,14 @@ class ApprovalQueue:
                 self._table[aid] = entry
             entry._event.wait(self._timeout)
             with self._lock:
-                self._table.pop(aid, None)
                 # A decision posted right at expiry still wins (it was accepted).
                 return entry._decision if entry._decision is not None else Decision.TIMEOUT
         except Exception:  # never raise: caller must always be able to journal
             return Decision.DENIED
+        finally:
+            if aid is not None:
+                with self._lock:
+                    self._table.pop(aid, None)
 
     def pending(self) -> list[PendingApproval]:
         with self._lock:
@@ -77,20 +81,23 @@ def console_resolve(queue: ApprovalQueue, line: str, *, out: Callable[[str], obj
     """Handle one operator line: ``list``, ``approve <id>``, ``deny <id>``."""
     parts = line.split()
     if not parts:
-        return out("commande vide (list | approve <id> | deny <id>)")
+        out("commande vide (list | approve <id> | deny <id>)")
+        return
     cmd = parts[0].lower()
     if cmd == "list":
         pend = queue.pending()
         if not pend:
-            return out("aucune approbation en attente")
+            out("aucune approbation en attente")
         for p in pend:
             out(f"{p.id}  {p.tool}  {p.params}")
-        return None
-    if cmd in ("approve", "deny"):
+    elif cmd in ("approve", "deny"):
         if len(parts) != 2:
-            return out(f"usage : {cmd} <id>")
+            out(f"usage : {cmd} <id>")
+            return
         decision = Decision.APPROVED if cmd == "approve" else Decision.DENIED
         if queue.resolve(parts[1], decision):
-            return out(f"{parts[1]} : {decision.value}")
-        return out(f"{parts[1]} : id inconnu ou déjà résolu")
-    return out(f"commande inconnue : {cmd} (list | approve <id> | deny <id>)")
+            out(f"{parts[1]} : {decision.value}")
+        else:
+            out(f"{parts[1]} : id inconnu ou déjà résolu")
+    else:
+        out(f"commande inconnue : {cmd} (list | approve <id> | deny <id>)")
