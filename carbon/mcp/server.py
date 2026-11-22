@@ -72,6 +72,33 @@ def build_mcp_server(session: Session) -> MCPServer:
         """Return tools, methodology mode, recent history, channel and interface."""
         return sess.state()
 
+    # Methodology tools: thin delegates to the Session (the engine lives there).
+    # Bad input (unknown mode, non-candidate step, nothing loaded) raises in the
+    # Session and surfaces as an MCP tool error (isError), not an error dict.
+    @server.tool()
+    def methodology_load(path: str) -> dict[str, Any]:
+        """Load a methodology tree (YAML path) and return the session state."""
+        sess.load_methodology(path)
+        return sess.state()
+
+    @server.tool()
+    def mode_set(mode: str) -> dict[str, Any]:
+        """Set the methodology mode ('guided' or 'libre') and return the state."""
+        sess.set_mode(mode)
+        return sess.state()
+
+    @server.tool()
+    def step_ack() -> dict[str, Any]:
+        """Acknowledge the current (tool-less) step and return the state."""
+        sess.step_ack()
+        return sess.state()
+
+    @server.tool()
+    def step_choose(step_id: str) -> dict[str, Any]:
+        """Choose among candidate next steps by id and return the state."""
+        sess.step_choose(step_id)
+        return sess.state()
+
     @server.resource("carbon://journal")
     def journal() -> str:
         """Raw JSONL journal of every tool call."""
