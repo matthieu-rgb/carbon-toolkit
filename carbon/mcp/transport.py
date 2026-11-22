@@ -75,10 +75,18 @@ class BearerAuthMiddleware:
         await self.app(scope, receive, send)
 
 
-def build_http_app(session: Session, token: str):
-    """Streamable-HTTP Starlette app guarded by the Bearer token."""
+def build_mcp_sub_app(session: Session, token: str):
+    """Bearer-wrapped streamable-HTTP ASGI app (route ``/mcp``, owns the MCP lifespan).
+
+    Shared by ``carbon mcp serve --transport http`` and ``carbon web``.
+    """
     app = build_mcp_server(session).streamable_http_app()
     return BearerAuthMiddleware(app, token)
+
+
+def build_http_app(session: Session, token: str):
+    """Streamable-HTTP app guarded by the Bearer token (standalone MCP server)."""
+    return build_mcp_sub_app(session, token)
 
 
 def _console_loop(queue: ApprovalQueue) -> None:
