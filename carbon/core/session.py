@@ -168,6 +168,10 @@ class Session:
         history = [r.to_dict() for r in self.history]
         return {
             "tools": self.registry.names(),
+            "tool_specs": [
+                {"name": n,
+                 "destructive": bool(getattr(self.registry.get(n), "destructive", False))}
+                for n in self.registry.names()],
             "methodology": self._methodology_state(),
             "history": history,
             "channel": self.channel,

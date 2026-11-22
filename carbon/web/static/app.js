@@ -10,7 +10,8 @@
   }
 
   // Tool parameter forms. kind: int | num | str | bool | enum. Mirrors the server schemas.
-  var WRITES = { can_inject: 1, can_replay: 1, uds_session: 1, uds_security_access: 1, uds_clear_dtc: 1 };
+  // Backend-sourced (state.tool_specs): WRITES == destructive == approval-gated.
+  var WRITES = {};
   var PARAMS = {
     can_sniff: [["count", "int"], ["timeout", "num"]],
     can_dump: [["path", "str", 1], ["count", "int"], ["timeout", "num"]],
@@ -277,6 +278,8 @@
 
   function apply(st) {
     state = st;
+    WRITES = {};
+    (st.tool_specs || []).forEach(function (t) { if (t.destructive) WRITES[t.name] = 1; });
     renderStatus(st);
     renderSurface(st.surface || { nodes: [], edges: [], current: null });
     renderTools(st.tools || []);

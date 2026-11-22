@@ -127,3 +127,14 @@ def test_approvals_resolve(env):
     assert out == [Decision.APPROVED]
     assert _post(c, f"/api/approvals/{aid}", json={"decision": "approve"}).status_code == 409
     assert _post(c, "/api/approvals/zzzz", json={"decision": "deny"}).status_code == 409
+
+
+def test_state_tool_specs_match_destructive_gate(env):
+    c, _, _ = env
+    d = c.get("/api/state").json()
+    spec = {t["name"]: t["destructive"] for t in d["tool_specs"]}
+    for n in ("uds_clear_dtc", "can_inject", "can_replay"):
+        assert spec[n] is True
+    for n in ("uds_session", "uds_security_access", "uds_scan"):
+        assert spec[n] is False
+    assert d["tools"] == [t["name"] for t in d["tool_specs"]]
