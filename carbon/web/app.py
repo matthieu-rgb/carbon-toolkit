@@ -6,18 +6,24 @@ Origin check (which only fires on unsafe methods) must cover all mutations.
 """
 from __future__ import annotations
 
+import json
+import queue as _queue
+import time
+from pathlib import Path
 from typing import Any
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.background import BackgroundTask
+from starlette.responses import HTMLResponse, JSONResponse, StreamingResponse
 from starlette.routing import Route
 
 from carbon.core.execute import Decision, Origin
 from carbon.core.session import Session
 from carbon.mcp.approval import ApprovalQueue
+from carbon.web.events import Broker
 from carbon.web.security import WebGuardMiddleware
 
 _PLACEHOLDER = "<!doctype html><html><head><title>CARBON</title></head><body>CARBON web client</body></html>"
@@ -81,9 +87,34 @@ def _validate(name: str, body: Any) -> dict[str, Any]:
     return out
 
 
-def build_web_app(session: Session, broker: Any, queue: ApprovalQueue,
-                  token: str, port: int) -> Starlette:
-    # broker is wired in the SSE task.
+def _frame(etype: str, data: Any) -> str:
+    return f"event: {etype}\ndata: {json.dumps(data, default=str)}\n\n"
+
+
+def create_web_runtime(*, channel: str, interface: str, journal_path: Path,
+                       token: str, port: int, approval_timeout: float = 300.0,
+                       heartbeat: float = 15.0, **session_kwargs: Any):
+    """Single place that wires broker <-> approval queue <-> session <-> app.
+
+    Returns (app, session, queue, broker). The callbacks are only
+    ``broker.publish`` (never raises): ``Session.on_change`` raising would
+    propagate out of ``run_tool``.
+    """
+    broker = Broker()
+    queue = ApprovalQueue(
+        timeout=approval_timeout,
+        on_pending=lambda p: broker.publish(
+            {"type": "approval", "id": p.id, "tool": p.tool, "params": p.params}),
+    )
+    session = Session(channel=channel, interface=interface, journal_path=journal_path,
+                      approver=queue, on_change=lambda: broker.publish({"type": "state"}),
+                      **session_kwargs)
+    app = build_web_app(session, broker, queue, token, port, heartbeat=heartbeat)
+    return app, session, queue, broker
+
+
+def build_web_app(session: Session, broker: Broker, queue: ApprovalQueue,
+                  token: str, port: int, *, heartbeat: float = 15.0) -> Starlette:
     async def index(request: Request):
         return HTMLResponse(_PLACEHOLDER)
 
@@ -119,12 +150,49 @@ def build_web_app(session: Session, broker: Any, queue: ApprovalQueue,
                                 status_code=400)
         if not queue.resolve(request.path_params["id"], decision):
             return JSONResponse({"error": "unknown or already resolved"}, status_code=409)
+        broker.publish({"type": "resolved", "id": request.path_params["id"],
+                        "decision": body["decision"]})
         return JSONResponse({"ok": True})
+
+    async def events(request: Request):
+        # Subscribe before the snapshot so no event is missed in between.
+        sub = broker.subscribe()
+
+        async def gen():
+            try:
+                snap = await run_in_threadpool(session.state)
+                yield _frame("state", snap)
+                yield _frame("pending", [{"id": p.id, "tool": p.tool, "params": p.params}
+                                         for p in queue.pending()])
+                last = time.monotonic()
+                poll = max(0.05, min(0.5, heartbeat))
+                while True:
+                    try:
+                        ev = await run_in_threadpool(sub.get, poll)
+                    except _queue.Empty:
+                        if time.monotonic() - last >= heartbeat:
+                            last = time.monotonic()
+                            yield ": ping\n\n"
+                        continue
+                    last = time.monotonic()
+                    et = ev.get("type")
+                    if et == "state":
+                        yield _frame("state", await run_in_threadpool(session.state))
+                    elif et in ("approval", "resolved"):
+                        yield _frame(et, ev)
+            finally:
+                sub.unsubscribe()  # also runs on client disconnect (cancellation)
+
+        return StreamingResponse(
+            gen(), media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            background=BackgroundTask(sub.unsubscribe))
 
     return Starlette(routes=[
         Route("/", index, methods=["GET"]),
         Route("/api/state", state, methods=["GET"]),
         Route("/api/tool/{name}", run_tool, methods=["POST"]),
+        Route("/api/events", events, methods=["GET"]),
         Route("/api/approvals", approvals, methods=["GET"]),
         Route("/api/approvals/{id}", resolve, methods=["POST"]),
     ], middleware=[Middleware(WebGuardMiddleware, token=token, port=port)])
