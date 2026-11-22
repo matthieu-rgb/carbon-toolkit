@@ -97,3 +97,9 @@ def test_current_tool_override_and_dtcs():
     assert s["current"] == "ecu:0x7e8"
     assert build_surface(hist, channel="c", current_tool="can_sniff")["current"] == "bus:c"
     assert build_surface(hist, channel="c", current_tool="bogus")["current"] == "ecu:0x7e8"
+
+
+def test_none_valued_result_keys_do_not_raise():
+    for tool, key in (("can_sniff", "frames"), ("uds_scan", "supported"),
+                      ("uds_read_dtc", "dtcs")):
+        build_surface([_r(tool, {key: None})], channel="can0")
