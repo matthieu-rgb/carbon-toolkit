@@ -15,8 +15,8 @@ destructive actions and an append-only audit journal. Licensed GPL-3.0-or-later.
 
 ### Docker image (x86_64 and ARM64)
 
-    docker buildx build --platform linux/amd64,linux/arm64 -t carbon:0.3.0 .   # multi-arch (needs a registry or --push)
-    docker buildx build --load -t carbon:0.3.0 .                               # host arch only, into the local daemon
+    docker buildx build --platform linux/amd64,linux/arm64 -t carbon:0.4.0 .   # multi-arch (needs a registry or --push)
+    docker buildx build --load -t carbon:0.4.0 .                               # host arch only, into the local daemon
 
 The image bundles `carbon`, python-can and `can-utils`. It runs unprivileged
 and does not need `--privileged`.
@@ -29,10 +29,10 @@ Real CAN needs Linux. Create a virtual bus on the host (root, `vcan` module):
 
 Run the container on the host network so it sees `vcan0` (a socketcan socket needs no extra capability):
 
-    docker run --rm --network host -v "$PWD:/work" carbon:0.3.0 can_sniff --count 5
-    docker run --rm --network host -v "$PWD:/work" carbon:0.3.0 can_dump capture.log --count 100
-    docker run --rm --network host -v "$PWD:/work" carbon:0.3.0 --yes can_replay capture.log
-    docker run --rm --network host -v "$PWD:/work" carbon:0.3.0 --yes can_inject 7DF 0201
+    docker run --rm --network host -v "$PWD:/work" carbon:0.4.0 can_sniff --count 5
+    docker run --rm --network host -v "$PWD:/work" carbon:0.4.0 can_dump capture.log --count 100
+    docker run --rm --network host -v "$PWD:/work" carbon:0.4.0 --yes can_replay capture.log
+    docker run --rm --network host -v "$PWD:/work" carbon:0.4.0 --yes can_inject 7DF 0201
 
 Global options go before the subcommand: `--channel` (default `vcan0`),
 `--interface` (default `socketcan`), `--journal` (default `carbon-session.jsonl`),
@@ -59,7 +59,7 @@ while `can_dump` records it, injects a frame, checks that a destructive command
 without `--yes` is refused and that the journal has entries, then prints
 `cycle CAN OK` (exit 0) or fails (exit != 0).
 
-    docker run --rm carbon:0.3.0 smoke        # in the image
+    docker run --rm carbon:0.4.0 smoke        # in the image
     bash scripts/smoke_can_cycle.sh            # on a host where `carbon` is on PATH
 
 Bus selection is automatic: `vcan0` over socketcan when `scripts/setup_vcan.sh`
@@ -118,7 +118,7 @@ accepts other algorithms implementing `key_from_seed(seed) -> key`.
 
 - Linux with `vcan0` (see Quickstart): use `--channel vcan0` as above; run the
   ECU and the tools in containers with `--network host`, e.g.
-  `docker run --rm --network host carbon:0.3.0 emu start`.
+  `docker run --rm --network host carbon:0.4.0 emu start`.
 - No Linux/vcan (macOS, plain container): use a python-can emulated bus that is
   shared across processes, e.g. `--interface udp_multicast --channel 239.74.163.3`
   on both the ECU and the tools (the in-process `virtual` bus cannot be shared
@@ -134,8 +134,8 @@ locked DID refused, unlock, DID readable, 2 DTCs, clear, 0 DTC), stops the ECU,
 and prints `cycle UDS OK` (exit 0) or fails (exit != 0). Bus selection is the
 same as for the CAN smoke test.
 
-    docker run --rm --user root --cap-add NET_ADMIN --network host carbon:0.3.0 smoke-uds   # vcan0 in the image
-    docker run --rm carbon:0.3.0 smoke-uds                                                    # udp_multicast fallback
+    docker run --rm --user root --cap-add NET_ADMIN --network host carbon:0.4.0 smoke-uds   # vcan0 in the image
+    docker run --rm carbon:0.4.0 smoke-uds                                                    # udp_multicast fallback
     bash scripts/smoke_uds_cycle.sh                                                          # host with `carbon` on PATH
 
 ## Piloter CARBON par MCP
@@ -172,7 +172,7 @@ Sans réponse, l'action expire et est refusée. Tout est journalisé.
 
 ### Smoke test et vérification manuelle
 
-    bash scripts/smoke_mcp.sh                 # ou : docker run --rm carbon:0.3.0 smoke-mcp
+    bash scripts/smoke_mcp.sh                 # ou : docker run --rm carbon:0.4.0 smoke-mcp
 
 Le smoke lance l'ECU simulé et un client MCP en mémoire (outils, `uds_scan`,
 `session_state`, ressource `carbon://journal`, destructif en attente puis
@@ -183,3 +183,34 @@ réel avec un modèle local (Ollama, via un client MCP) puis avec un modèle de
 frontière (Claude), sur l'ECU simulé ; vérifier que le scan, la lecture des DID
 et la session fonctionnent, et qu'un `uds_clear_dtc` reste bloqué jusqu'à
 l'`approve` saisi à la console du serveur.
+
+## Mode Guidé
+
+v0.4 ajoute un parcours guidé : un moteur de méthodologie déclaratif
+(`carbon/methodology/trees/carbon_v1.yaml`) et une interface Textual qui
+déroulent les phases CAN/UDS 1 à 6 (accès, reconnaissance CAN, découverte et
+session UDS, lecture des DTC, seed-key, effacement, rejeu, injection).
+
+    carbon tui --methodology carbon/methodology/trees/carbon_v1.yaml
+
+Sans matériel, le parcours tourne sur `vcan0` (ou le bus virtuel) avec l'ECU
+simulé (voir « UDS / simulated ECU »). À chaque étape la TUI affiche l'objectif,
+l'outil attendu et le résultat ; l'étape suivante n'est débloquée que si la
+condition de l'étape est remplie. En mode Guidé, un outil hors parcours est
+refusé ; le mode Libre reste disponible.
+
+Les étapes destructrices (`uds_clear_dtc`, `can_replay`, `can_inject`) passent
+toujours par l'approbation : la TUI ouvre une modale que l'opérateur accepte ou
+refuse, le garde-fou v0.3 reste intact et tout est journalisé. La position dans
+le parcours est sauvegardée et reprise au relancement.
+
+Critère AC-12 : un débutant installe CARBON (source ou Docker) et boucle un
+parcours complet de bout en bout, sur l'ECU simulé, sans autre prérequis.
+
+### Smoke test du mode guidé
+
+    bash scripts/smoke_guided.sh                 # ou : docker run --rm carbon:0.4.0 smoke-guided
+
+Le smoke exerce le moteur (sans la TUI) sur l'ECU simulé : déroule les étapes
+1 à 6, approuve les actions destructrices depuis un thread, vérifie l'étape
+finale puis la reprise de l'état persisté, et affiche `smoke GUIDED OK`.
