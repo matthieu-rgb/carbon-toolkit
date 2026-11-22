@@ -105,6 +105,8 @@ def create_web_runtime(*, channel: str, interface: str, journal_path: Path,
         timeout=approval_timeout,
         on_pending=lambda p: broker.publish(
             {"type": "approval", "id": p.id, "tool": p.tool, "params": p.params}),
+        on_resolved=lambda aid, d: broker.publish(
+            {"type": "resolved", "id": aid, "decision": d.value}),
     )
     session = Session(channel=channel, interface=interface, journal_path=journal_path,
                       approver=queue, on_change=lambda: broker.publish({"type": "state"}),
@@ -150,8 +152,6 @@ def build_web_app(session: Session, broker: Broker, queue: ApprovalQueue,
                                 status_code=400)
         if not queue.resolve(request.path_params["id"], decision):
             return JSONResponse({"error": "unknown or already resolved"}, status_code=409)
-        broker.publish({"type": "resolved", "id": request.path_params["id"],
-                        "decision": body["decision"]})
         return JSONResponse({"ok": True})
 
     async def events(request: Request):
