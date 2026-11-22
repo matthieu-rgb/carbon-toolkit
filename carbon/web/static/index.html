@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CARBON - attack surface</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header id="status">
+  <span class="brand">CARBON</span>
+  <span class="kv">bus <b id="s-bus">-</b></span>
+  <span class="kv">interface <b id="s-if">-</b></span>
+  <span class="kv">session <b id="s-sess">-</b></span>
+  <span class="kv">security <b id="s-sec">locked</b></span>
+  <span class="sp"></span>
+  <span class="kv" id="link">connecting</span>
+</header>
+<main id="app">
+  <div id="mapwrap">
+    <div id="cy" tabindex="0" aria-label="Attack surface map. Arrow keys move between nodes, Enter runs the matching tool."></div>
+    <div id="empty">Nothing discovered yet. <b>Run a tool</b> from the panel (try <code>can_sniff</code>, then <code>uds_scan</code>); the map fills in from what the bus answers.</div>
+    <div id="legend">
+      <h4>Legend</h4>
+      <ul id="legend-list"></ul>
+      <div class="hint"><kbd>&larr;</kbd><kbd>&rarr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd> move &nbsp;<kbd>Enter</kbd> run &nbsp;<kbd>/</kbd> filter &nbsp;<kbd>?</kbd> legend</div>
+    </div>
+  </div>
+  <aside>
+    <section id="sel"><h3>Selected</h3><div id="sel-body" class="meta">Click a node, or use the arrow keys.</div></section>
+    <section><h3>Tools</h3><ul id="tools"></ul><div id="run-err" class="err-line"></div></section>
+    <section><h3>Journal</h3><input id="filter" placeholder="filter  (/)" aria-label="Filter journal"><ul id="journal"></ul></section>
+  </aside>
+</main>
+<div id="modals" aria-live="assertive"></div>
+<script src="/static/vendor/cytoscape.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
