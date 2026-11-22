@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import sys
 import threading
-from datetime import datetime, timezone
 from pathlib import Path
 
 import click
 
 from carbon.can.bus import BusError
-from carbon.core.confirm import authorize
+from carbon.core.execute import ActionRefused, Origin, execute_tool
 from carbon.core.journal import Journal, JournalError
 from carbon.core.registry import Registry
-from carbon.core.result import ToolResult
 from carbon.emu.ecu import EcuConfig, SimulatedEcu
 from carbon.tools.can_dump import CanDump
 from carbon.tools.can_inject import CanInject
@@ -25,10 +23,8 @@ from carbon.tools.uds_read_dtc import UdsReadDtc
 from carbon.tools.uds_scan import UdsScan
 from carbon.tools.uds_security_access import UdsSecurityAccess
 from carbon.tools.uds_session import UdsSession
-from carbon.uds.connection import UdsError
 
 DEFAULT_JOURNAL = "carbon-session.jsonl"  # relative to the current directory
-ACTOR = "cli"
 
 
 def build_registry() -> Registry:
@@ -106,31 +102,17 @@ def _make_command(adapter) -> click.Command:
     @click.pass_context
     def callback(ctx: click.Context, **params):
         g = ctx.obj
-        if not authorize(
-            adapter, assume_yes=g["yes"], interactive=sys.stdin.isatty()
-        ):
+        run_params = {"channel": g["channel"], "interface": g["interface"], **params}
+        try:
+            result = execute_tool(
+                adapter, run_params, origin=Origin.CLI, journal=Journal(g["journal"]),
+                assume_yes=g["yes"], interactive=sys.stdin.isatty(),
+            )
+        except ActionRefused:
+            # Refusals are intentionally not journaled: nothing touched the bus.
             raise click.ClickException(
                 f"{adapter.name} is destructive: refused (use --yes to authorize)"
             )
-        # Refusals above are intentionally not journaled: nothing touched the bus.
-        run_params = {"channel": g["channel"], "interface": g["interface"], **params}
-        started = datetime.now(timezone.utc)
-        journal = Journal(g["journal"])
-        try:
-            result = adapter.run(**run_params)
-        except (BusError, UdsError, ValueError, OSError) as exc:
-            # Failed/partial runs may already have hit the bus: journal the outcome.
-            failure = ToolResult(
-                tool=adapter.name, ok=False, summary=f"failed: {exc}",
-                started_at=started, ended_at=datetime.now(timezone.utc),
-            )
-            try:
-                journal.record(failure, _jsonable(run_params), ACTOR)
-            except JournalError as jexc:
-                raise click.ClickException(f"{exc} (additionally, {jexc})")
-            raise click.ClickException(str(exc))
-        try:
-            journal.record(result, _jsonable(run_params), ACTOR)
         except JournalError as exc:
             raise click.ClickException(f"{adapter.name} executed but {exc}")
         click.echo(result.summary)
@@ -143,10 +125,6 @@ def _make_command(adapter) -> click.Command:
     return click.Command(
         adapter.name, params=list(_PARAMS.get(adapter.name, [])), callback=callback, help=doc
     )
-
-
-def _jsonable(params: dict) -> dict:
-    return {k: (v.hex() if isinstance(v, bytes) else v) for k, v in params.items()}
 
 
 def _build_emu_group() -> click.Group:
