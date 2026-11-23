@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import deque
 from datetime import datetime
 from typing import Any
 
@@ -10,6 +11,7 @@ from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Header, Input, OptionList, Static
 
@@ -18,10 +20,12 @@ from carbon.core.result import ToolResult
 from carbon.mcp.approval import ApprovalQueue, PendingApproval
 from carbon.tui.present import (
     banner_for,
+    device_box,
     interpret,
     journal_entries,
     progress_rail,
     services_from_surface,
+    sparkline,
 )
 
 
@@ -84,6 +88,8 @@ class CarbonApp(App):
     #banner { display: none; height: 1; text-align: center; text-style: bold; }
     #banner.banner-ok { display: block; background: $success; color: $text; }
     #progress { padding: 0 1; height: 1; color: $text; }
+    #meters { padding: 0 1; height: 1; color: $text-muted; }
+    #device { height: auto; padding: 0 1; }
     #main-row { height: 1fr; }
     #left-col { width: 2fr; padding: 0 1; }
     #right-col { width: 1fr; padding: 0 1; }
@@ -111,12 +117,16 @@ class CarbonApp(App):
         self.busy = False
         self.last_result: ToolResult | None = None
         self.journal_lines: list[str] = []
+        self.meters: dict[str, deque] = {
+            k: deque([0] * 12, maxlen=24) for k in ("rx", "uds", "inject")}
+        self._bucket: dict[str, int] = {"rx": 0, "uds": 0, "inject": 0}
 
     # ---- layout -----------------------------------------------------------
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static("", id="banner")
         yield Static(id="progress")
+        yield Static(id="meters")
         with Horizontal(id="main-row"):
             with Vertical(id="left-col"):
                 yield Static(id="step")
@@ -126,6 +136,7 @@ class CarbonApp(App):
                 yield Input(placeholder="paramètres : clé=valeur ...", id="params")
                 yield Static("(aucun résultat)", id="result")
             with Vertical(id="right-col"):
+                yield Static(id="device")
                 yield Static("SERVICES", classes="panel-title")
                 yield Static("(rien découvert)", id="services")
                 yield Static("JOURNAL", classes="panel-title")
@@ -134,6 +145,26 @@ class CarbonApp(App):
 
     def on_mount(self) -> None:
         self.refresh_view()
+        self._render_meters()
+        self.set_interval(0.5, self._tick)
+
+    # ---- live meters ------------------------------------------------------
+    def _tick(self) -> None:
+        for k, buf in self.meters.items():
+            buf.append(self._bucket[k])
+            self._bucket[k] = 0
+        self._render_meters()
+
+    def _render_meters(self) -> None:
+        try:
+            meters_w = self.query_one("#meters", Static)
+        except NoMatches:
+            return  # timer may fire during mount/unmount transitions
+        m = self.meters
+        meters_w.update(
+            f"CAN rx [green]{sparkline(m['rx'])}[/]   "
+            f"UDS [cyan]{sparkline(m['uds'])}[/]   "
+            f"inject [yellow]{sparkline(m['inject'])}[/]")
 
     # ---- approval bridge (called from the approver thread) ----------------
     def on_pending(self, pending: PendingApproval) -> None:
@@ -155,7 +186,12 @@ class CarbonApp(App):
         step_w, status_w = self.query_one("#step", Static), self.query_one("#status", Static)
         choices, tools = self.query_one("#choices", OptionList), self.query_one("#tools", OptionList)
         params = self.query_one("#params", Input)
-        self._refresh_services(st.get("surface") or {})
+        surf = st.get("surface") or {}
+        self._refresh_services(surf)
+        sess = surf.get("session") or {}
+        self.query_one("#device", Static).update(
+            device_box(unlocked=bool(sess.get("unlocked")),
+                       session=str(sess.get("active") or "")))
         if not m.get("loaded"):
             self.query_one("#progress", Static).update("")
             step_w.update("Aucune méthodologie chargée.")
@@ -290,6 +326,18 @@ class CarbonApp(App):
             return
         self.call_from_thread(self._run_done, result)
 
+    def _bump_meter(self, result: ToolResult) -> None:
+        tool, data = result.tool, (result.data or {})
+        if tool in ("can_sniff", "can_dump"):
+            frames = data.get("frames")
+            self._bucket["rx"] += len(frames) if isinstance(frames, list) else int(frames or 0)
+        elif tool == "can_inject":
+            self._bucket["inject"] += 1
+        elif tool == "can_replay":
+            self._bucket["inject"] += int(data.get("frames") or 0) or 1
+        elif tool.startswith("uds_"):
+            self._bucket["uds"] += 1
+
     def _run_failed(self, tool: str, exc: Exception) -> None:
         self.busy = False
         self._show_result(f"{tool} : erreur {exc}")
@@ -299,6 +347,7 @@ class CarbonApp(App):
         self.busy = False
         self.last_result = result
         d = result.to_dict()
+        self._bump_meter(result)
         ts = datetime.now().strftime("%H:%M:%S")
         colour = "green" if result.ok else "red"
         entries = journal_entries(d)

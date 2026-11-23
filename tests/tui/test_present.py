@@ -2,11 +2,13 @@
 from carbon.tui.present import (
     PHASES,
     banner_for,
+    device_box,
     interpret,
     journal_entries,
     phase_of,
     progress_rail,
     services_from_surface,
+    sparkline,
 )
 
 
@@ -89,6 +91,22 @@ def test_journal_entries_single_line_for_other_tools():
     assert journal_entries(_r("uds_scan", supported=["0x10", "0x27"])) == [
         interpret(_r("uds_scan", supported=["0x10", "0x27"]))
     ]
+
+
+def test_sparkline_width_and_scaling():
+    assert len(sparkline([], width=12)) == 12
+    assert sparkline([0, 0, 0], width=3) == "▁▁▁"
+    line = sparkline([0, 5, 10], width=3)
+    assert len(line) == 3 and line[0] == "▁" and line[2] == "█"
+    # right-aligned padding when fewer values than width
+    assert sparkline([10], width=4).endswith("█") and sparkline([10], width=4)[0] == "▁"
+
+
+def test_device_box_reflects_lock_state():
+    locked = device_box(unlocked=False, session=None)
+    assert "locked" in locked and "red" in locked
+    unlocked = device_box(unlocked=True, session="extended")
+    assert "unlocked" in unlocked and "green" in unlocked and "extended" in unlocked
 
 
 def test_services_from_surface_lists_services_and_lock_state():

@@ -96,6 +96,37 @@ _SERVICE_NAMES = {
 }
 
 
+_BLOCKS = "▁▂▃▄▅▆▇█"
+
+
+def sparkline(values: Any, width: int = 12) -> str:
+    """A block sparkline of the last ``width`` values, scaled to the window's max."""
+    vals = [float(v) for v in list(values)[-width:]]
+    vals = [0.0] * (width - len(vals)) + vals
+    hi = max(vals)
+    if hi <= 0:
+        return _BLOCKS[0] * width
+    out = []
+    for v in vals:
+        idx = 0 if v <= 0 else min(len(_BLOCKS) - 1, 1 + int(v / hi * (len(_BLOCKS) - 2)))
+        out.append(_BLOCKS[idx])
+    return "".join(out)
+
+
+def device_box(*, unlocked: bool, session: str | None) -> str:
+    """A compact pixel-style ECU card, colored by lock state (rich markup)."""
+    colour = "green" if unlocked else "red"
+    lock = "unlocked" if unlocked else "locked "
+    sess = (session or "—")[:9].ljust(9)
+    return (
+        f"[{colour}]┌───────────┐[/]\n"
+        f"[{colour}]│[/] [b]ECU 0x7E8[/] [{colour}]│[/]\n"
+        f"[{colour}]│[/] 7E0→7E8  [{colour}]│[/]\n"
+        f"[{colour}]│[/] {sess}[{colour}]│[/]\n"
+        f"[{colour}]└──── {lock}─┘[/]"
+    )
+
+
 def banner_for(result: dict[str, Any]) -> tuple[str, str] | None:
     """A milestone banner (text, css-class) for a result, or None.
 
