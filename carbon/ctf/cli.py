@@ -17,6 +17,11 @@ from carbon.ctf.progress import Progress, default_progress_path, load_progress
 
 _STATUS_STYLE = {SOLVED: "green", AVAILABLE: "bold", LOCKED: "dim"}
 _STATUS_MARK = {SOLVED: "✓ résolu", AVAILABLE: "• dispo", LOCKED: "🔒 verrouillé"}
+_DIFF_ORDER = {"intro": 0, "easy": 1, "medium": 2, "hard": 3}
+
+
+def _diff_rank(c: Challenge) -> tuple[int, str]:
+    return (_DIFF_ORDER.get(c.difficulty, 9), c.id)
 
 
 def _load(ctx) -> tuple[list[Challenge], Progress]:
@@ -54,7 +59,7 @@ def build_ctf_group() -> click.Group:
         table.add_column("catégorie", no_wrap=True)
         table.add_column("diff.", no_wrap=True)
         table.add_column("état", no_wrap=True)
-        for c in challenges:
+        for c in sorted(challenges, key=_diff_rank):
             if category and c.category != category:
                 continue
             if difficulty and c.difficulty != difficulty:

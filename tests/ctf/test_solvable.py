@@ -62,3 +62,27 @@ def test_unlock_protected(session):
 def test_seed_key_algo():
     key = ExampleSeedKey().key_from_seed(bytes.fromhex("11223344")).hex()
     assert check_flag(_by_id()["seed-key-algo"], f"CARBON{{{key}}}")
+
+
+def test_count_services(session):
+    supported = session.run_tool("uds_scan", origin=Origin.CLI).data["supported"]
+    assert check_flag(_by_id()["count-services"], f"CARBON{{{len(supported)}}}")
+
+
+def test_locked_read_nrc(session):
+    denied = session.run_tool("uds_read_did", did=0x1234, origin=Origin.CLI)
+    assert denied.ok is False
+    assert check_flag(_by_id()["locked-read"], f"CARBON{{{denied.data['nrc']}}}")
+
+
+def test_seed_key_generic():
+    key = ExampleSeedKey().key_from_seed(bytes.fromhex("cafebabe")).hex()
+    assert check_flag(_by_id()["seed-key-generic"], f"CARBON{{{key}}}")
+
+
+def test_capstone_full_chain(session):
+    session.run_tool("uds_session", origin=Origin.CLI)
+    session.run_tool("uds_security_access", origin=Origin.CLI)
+    value = session.run_tool("uds_read_did", did=0x1234, origin=Origin.CLI).data["value"]
+    key = ExampleSeedKey().key_from_seed(bytes.fromhex("11223344")).hex()
+    assert check_flag(_by_id()["capstone"], f"CARBON{{{value}:{key}}}")

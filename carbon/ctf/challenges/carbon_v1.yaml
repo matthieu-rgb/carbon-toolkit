@@ -104,3 +104,81 @@
     - text: "clé = rotation_gauche_32bits(graine XOR 0xA5A5A5A5, 3 bits)."
     - text: "Pour 0x11223344 : XOR 0xA5A5A5A5 puis rotation à gauche de 3 bits."
       cost: 50
+
+- id: count-services
+  title: "Cartographier la surface"
+  category: recon
+  difficulty: easy
+  points: 75
+  briefing: |
+    Combien de services de diagnostic UDS le calculateur prend-il en charge ?
+    Scanne-le et soumets le nombre : CARBON{N}.
+  target:
+    in_scope: ["uds_scan"]
+  flag:
+    match: hash
+    sha256: "56f6453e5f14f4d2fbbca0380a084f3f1a51e87d5f3b1839f22e4a91c74335da"
+  hints:
+    - text: "uds_scan distingue les services supportés de ceux en NRC 0x11."
+    - text: "Compte uniquement les services qui répondent positivement."
+      cost: 25
+
+- id: locked-read
+  title: "Lire le code de refus"
+  category: uds
+  difficulty: easy
+  points: 100
+  requires: [read-vin]
+  briefing: |
+    Essaie de lire le DID protégé 0x1234 sans rien déverrouiller. Le calculateur
+    refuse avec un code de réponse négative (NRC). Soumets ce code : CARBON{0x..}.
+  target:
+    did: "0x1234"
+    in_scope: ["uds_read_did"]
+  flag:
+    match: hash
+    sha256: "872646c0b4ecf0e9f6a2d87097138f9ed368b36eb7fd50bc336daf248ba284a4"
+  hints:
+    - text: "uds_read_did sur un DID protégé renvoie un NRC dans le résultat."
+    - text: "securityAccessDenied porte le code 0x33."
+      cost: 25
+
+- id: seed-key-generic
+  title: "Maîtriser l'algorithme"
+  category: reversing
+  difficulty: hard
+  points: 200
+  requires: [seed-key-algo]
+  briefing: |
+    Tu connais l'algorithme seed-key. Prouve que tu le maîtrises pour n'importe
+    quelle graine : calcule la clé pour la graine 0xCAFEBABE et soumets-la sous
+    la forme CARBON{........} (8 chiffres hex).
+  target:
+    seed: "0xCAFEBABE"
+  flag:
+    match: hash
+    sha256: "b838b55639a1f5b4b119f6d3f61c6e51fa10869659dda57b6b4371955013934c"
+  hints:
+    - text: "Même transformation que pour la graine d'exemple : XOR puis rotation."
+    - text: "clé = rotation_gauche_32bits(0xCAFEBABE XOR 0xA5A5A5A5, 3 bits)."
+      cost: 75
+
+- id: capstone
+  title: "Chaîne complète"
+  category: securityaccess
+  difficulty: hard
+  points: 250
+  requires: [unlock-protected, seed-key-algo]
+  briefing: |
+    Épreuve finale. Déverrouille et lis la valeur protégée (0x1234), et calcule
+    la clé seed-key pour la graine 0x11223344. Soumets les deux, la valeur puis
+    la clé, séparées par deux-points : CARBON{valeur:cle}.
+  target:
+    in_scope: ["uds_session", "uds_security_access", "uds_read_did"]
+  flag:
+    match: hash
+    sha256: "0a77b543c562b9ab16713f12a73a462ba2a932e507b0239f929f9f8327dc13c1"
+  hints:
+    - text: "Reprends unlock-protected pour la valeur, seed-key-algo pour la clé."
+    - text: "Format exact : CARBON{<valeur hex>:<clé hex>} en minuscules."
+      cost: 100
