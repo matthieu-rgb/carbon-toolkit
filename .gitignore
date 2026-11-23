@@ -9,3 +9,6 @@ dist/
 build/
 # OS
 .DS_Store
+# Runtime session artifacts
+carbon-session.jsonl
+*.state.json
