@@ -18,6 +18,7 @@ class Origin(enum.Enum):
     CLI = "cli"
     MCP = "mcp"
     TUI = "tui"
+    WEB = "web"
 
 
 class Decision(enum.Enum):

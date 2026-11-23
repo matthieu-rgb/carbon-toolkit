@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "carbon"
-version = "0.4.0"
+version = "0.5.0"
 description = "CARBON - containerized automotive pentest toolkit"
 requires-python = ">=3.11"
 license = { text = "GPL-3.0-or-later" }
@@ -18,13 +18,14 @@ dependencies = [
     "mcp==2.3.0",  # MCP SDK (server + in-memory client for tests)
     "PyYAML==6.0.4",  # methodology YAML (yaml.safe_load only)
     "textual==8.2.8",  # TUI (guided/libre views)
+    "starlette==1.10.0",  # Web client ASGI app (direct dep, was transitive via mcp)
 ]
 
 [project.scripts]
 carbon = "carbon.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "httpx"]
 
 [tool.setuptools.packages.find]
 include = ["carbon*"]
@@ -34,3 +35,4 @@ testpaths = ["tests"]
 
 [tool.setuptools.package-data]
 "carbon.methodology.trees" = ["*.yaml"]
+"carbon.web.static" = ["*.html", "*.js", "*.css", "vendor/*"]

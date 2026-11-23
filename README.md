@@ -5,6 +5,11 @@ Containerized automotive pentest toolkit (v0.2): a CLI that drives a
 CAN bus and speaks UDS (ISO 14229) through a registry of tools, with an authorization guard for
 destructive actions and an append-only audit journal. Licensed GPL-3.0-or-later.
 
+## Documentation
+
+- [`docs/DESIGN.md`](docs/DESIGN.md) — architecture and design reference (English).
+- [`docs/GUIDE.md`](docs/GUIDE.md) — guide complet d'utilisation (français) : installation, concepts, parcours CAN/UDS, mode Guidé, mode Web, pilotage par IA.
+
 ## Install
 
 ### From source (Python >= 3.11)
@@ -15,8 +20,8 @@ destructive actions and an append-only audit journal. Licensed GPL-3.0-or-later.
 
 ### Docker image (x86_64 and ARM64)
 
-    docker buildx build --platform linux/amd64,linux/arm64 -t carbon:0.4.0 .   # multi-arch (needs a registry or --push)
-    docker buildx build --load -t carbon:0.4.0 .                               # host arch only, into the local daemon
+    docker buildx build --platform linux/amd64,linux/arm64 -t carbon:0.5.0 .   # multi-arch (needs a registry or --push)
+    docker buildx build --load -t carbon:0.5.0 .                               # host arch only, into the local daemon
 
 The image bundles `carbon`, python-can and `can-utils`. It runs unprivileged
 and does not need `--privileged`.
@@ -29,10 +34,10 @@ Real CAN needs Linux. Create a virtual bus on the host (root, `vcan` module):
 
 Run the container on the host network so it sees `vcan0` (a socketcan socket needs no extra capability):
 
-    docker run --rm --network host -v "$PWD:/work" carbon:0.4.0 can_sniff --count 5
-    docker run --rm --network host -v "$PWD:/work" carbon:0.4.0 can_dump capture.log --count 100
-    docker run --rm --network host -v "$PWD:/work" carbon:0.4.0 --yes can_replay capture.log
-    docker run --rm --network host -v "$PWD:/work" carbon:0.4.0 --yes can_inject 7DF 0201
+    docker run --rm --network host -v "$PWD:/work" carbon:0.5.0 can_sniff --count 5
+    docker run --rm --network host -v "$PWD:/work" carbon:0.5.0 can_dump capture.log --count 100
+    docker run --rm --network host -v "$PWD:/work" carbon:0.5.0 --yes can_replay capture.log
+    docker run --rm --network host -v "$PWD:/work" carbon:0.5.0 --yes can_inject 7DF 0201
 
 Global options go before the subcommand: `--channel` (default `vcan0`),
 `--interface` (default `socketcan`), `--journal` (default `carbon-session.jsonl`),
@@ -59,7 +64,7 @@ while `can_dump` records it, injects a frame, checks that a destructive command
 without `--yes` is refused and that the journal has entries, then prints
 `cycle CAN OK` (exit 0) or fails (exit != 0).
 
-    docker run --rm carbon:0.4.0 smoke        # in the image
+    docker run --rm carbon:0.5.0 smoke        # in the image
     bash scripts/smoke_can_cycle.sh            # on a host where `carbon` is on PATH
 
 Bus selection is automatic: `vcan0` over socketcan when `scripts/setup_vcan.sh`
@@ -118,7 +123,7 @@ accepts other algorithms implementing `key_from_seed(seed) -> key`.
 
 - Linux with `vcan0` (see Quickstart): use `--channel vcan0` as above; run the
   ECU and the tools in containers with `--network host`, e.g.
-  `docker run --rm --network host carbon:0.4.0 emu start`.
+  `docker run --rm --network host carbon:0.5.0 emu start`.
 - No Linux/vcan (macOS, plain container): use a python-can emulated bus that is
   shared across processes, e.g. `--interface udp_multicast --channel 239.74.163.3`
   on both the ECU and the tools (the in-process `virtual` bus cannot be shared
@@ -134,8 +139,8 @@ locked DID refused, unlock, DID readable, 2 DTCs, clear, 0 DTC), stops the ECU,
 and prints `cycle UDS OK` (exit 0) or fails (exit != 0). Bus selection is the
 same as for the CAN smoke test.
 
-    docker run --rm --user root --cap-add NET_ADMIN --network host carbon:0.4.0 smoke-uds   # vcan0 in the image
-    docker run --rm carbon:0.4.0 smoke-uds                                                    # udp_multicast fallback
+    docker run --rm --user root --cap-add NET_ADMIN --network host carbon:0.5.0 smoke-uds   # vcan0 in the image
+    docker run --rm carbon:0.5.0 smoke-uds                                                    # udp_multicast fallback
     bash scripts/smoke_uds_cycle.sh                                                          # host with `carbon` on PATH
 
 ## Piloter CARBON par MCP
@@ -172,7 +177,7 @@ Sans réponse, l'action expire et est refusée. Tout est journalisé.
 
 ### Smoke test et vérification manuelle
 
-    bash scripts/smoke_mcp.sh                 # ou : docker run --rm carbon:0.4.0 smoke-mcp
+    bash scripts/smoke_mcp.sh                 # ou : docker run --rm carbon:0.5.0 smoke-mcp
 
 Le smoke lance l'ECU simulé et un client MCP en mémoire (outils, `uds_scan`,
 `session_state`, ressource `carbon://journal`, destructif en attente puis
@@ -209,8 +214,49 @@ parcours complet de bout en bout, sur l'ECU simulé, sans autre prérequis.
 
 ### Smoke test du mode guidé
 
-    bash scripts/smoke_guided.sh                 # ou : docker run --rm carbon:0.4.0 smoke-guided
+    bash scripts/smoke_guided.sh                 # ou : docker run --rm carbon:0.5.0 smoke-guided
 
 Le smoke exerce le moteur (sans la TUI) sur l'ECU simulé : déroule les étapes
 1 à 6, approuve les actions destructrices depuis un thread, vérifie l'étape
 finale puis la reprise de l'état persisté, et affiche `smoke GUIDED OK`.
+
+## Mode Web / Carte de surface d'attaque
+
+`carbon web` sert un client Web local : une carte de la surface d'attaque
+construite en direct à partir de l'historique de la session, et le mode Libre
+pilotable au clic (lancer un outil, voir le résultat). C'est le même cœur que la
+TUI et le MCP (même `Session`, même registre d'outils, même file d'approbation,
+même journal). Le mode Guidé reste dans la TUI pour l'instant ; le Web est Libre
+uniquement.
+
+    carbon web                       # 127.0.0.1:8800
+    carbon --interface virtual --channel carbon-demo web --port 8800
+
+La commande affiche un lien d'amorçage à usage unique,
+`http://127.0.0.1:<port>/?k=<jeton-web>`, et le chemin du fichier de jeton MCP
+(le MCP reste servi sur `/mcp`). Ouvrir le lien dépose le cookie `carbon_web`
+(HttpOnly, SameSite=Strict) puis redirige (303) vers `/` ; le jeton n'apparaît
+plus dans l'URL ensuite.
+
+Posture de sécurité :
+
+- écoute sur `127.0.0.1` uniquement (toute autre adresse est refusée) ;
+- le jeton Web est distinct du jeton Bearer MCP : le cookie ne donne pas accès
+  à `/mcp`, et inversement ;
+- cookie `HttpOnly` + `SameSite=Strict` ; contrôle `Host` et `Origin`
+  (requêtes non sûres : `Origin` même origine obligatoire, 403 sinon) ;
+- les actions destructrices (`uds_clear_dtc`, `can_replay`, `can_inject`)
+  exigent une approbation humaine dans la modale du Web (AC-10) : un clic sur
+  l'outil ne suffit pas, et tout est journalisé.
+
+### Smoke test du Web
+
+    bash scripts/smoke_web.sh                    # ou : docker run --rm carbon:0.5.0 smoke-web
+
+Sans navigateur ni curl : démarre `carbon web` sur un canal virtuel, suit le lien
+d'amorçage, vérifie que `/api/state` est refusé sans cookie puis renvoie
+`surface` et `tools` avec, que le lien est à usage unique et que le cookie Web
+n'ouvre pas `/mcp`, puis affiche `WEB OK`. Il prouve l'état de session servi,
+l'authentification par cookie et la forme de l'état ; les exécutions d'outils
+sur CAN sont couvertes par la suite de tests (bus virtuel non partagé entre
+processus, l'ECU simulé n'est donc pas lancé).
