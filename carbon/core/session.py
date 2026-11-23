@@ -2,14 +2,17 @@
 """In-process session: shared registry, journal, bus config and result history."""
 from __future__ import annotations
 
+import contextlib
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from carbon.core.execute import Approver, Origin, execute_tool
 from carbon.core.journal import Journal
 from carbon.core.registry_builder import build_registry
 from carbon.core.result import ToolResult
+from carbon.core.surface import build_surface
 from carbon.methodology.engine import Engine
 from carbon.methodology.loader import load_methodology
 from carbon.methodology.persistence import load_state, save_state
@@ -27,6 +30,7 @@ class Session:
         engine: Engine | None = None,
         state_path: Path | None = None,
         methodology_ref: str | None = None,
+        on_change: Callable[[], None] | None = None,
     ) -> None:
         self.registry = build_registry()
         self.journal = Journal(journal_path)
@@ -38,6 +42,8 @@ class Session:
         self.engine = engine
         self.state_path = Path(state_path) if state_path is not None else None
         self.methodology_ref = methodology_ref
+        self._lock = threading.Lock()
+        self.on_change = on_change
 
     @property
     def mode(self) -> str:
@@ -114,21 +120,32 @@ class Session:
                 summary=f"hors parcours guidé: {name} n'est pas l'étape courante")
         adapter = self.registry.get(name)
         params = {**tool_params, "channel": self.channel, "interface": self.interface}
-        result = execute_tool(
-            adapter,
-            params,
-            origin=origin,
-            journal=self.journal,
-            assume_yes=assume_yes,
-            interactive=interactive,
-            approver=self.approver,
-        )
-        if self.engine is not None:
-            self.engine.observe(name, result.to_dict())
-            self._persist()
-        self.history.append(result)
-        if self.history_limit > 0:
-            del self.history[: -self.history_limit]
+        # Destructive tools may block for a long time waiting on the Approver;
+        # holding the lock there would freeze every other tool call, so only
+        # the post-execution state update is serialized for them.
+        destructive = bool(getattr(adapter, "destructive", False))
+        with contextlib.ExitStack() as stack:
+            if not destructive:
+                stack.enter_context(self._lock)
+            result = execute_tool(
+                adapter,
+                params,
+                origin=origin,
+                journal=self.journal,
+                assume_yes=assume_yes,
+                interactive=interactive,
+                approver=self.approver,
+            )
+            if destructive:
+                stack.enter_context(self._lock)
+            if self.engine is not None:
+                self.engine.observe(name, result.to_dict())
+                self._persist()
+            self.history.append(result)
+            if self.history_limit > 0:
+                del self.history[: -self.history_limit]
+        if self.on_change is not None:
+            self.on_change()
         return result
 
     def _methodology_state(self) -> dict[str, Any]:
@@ -148,12 +165,21 @@ class Session:
         }
 
     def state(self) -> dict[str, Any]:
+        history = [r.to_dict() for r in self.history]
         return {
             "tools": self.registry.names(),
+            "tool_specs": [
+                {"name": n,
+                 "destructive": bool(getattr(self.registry.get(n), "destructive", False))}
+                for n in self.registry.names()],
             "methodology": self._methodology_state(),
-            "history": [r.to_dict() for r in self.history],
+            "history": history,
             "channel": self.channel,
             "interface": self.interface,
+            "surface": build_surface(
+                history, channel=self.channel,
+                current_tool=next((h["tool"] for h in reversed(history)
+                                   if h["ok"]), None)),
         }
 
     def journal_text(self) -> str:

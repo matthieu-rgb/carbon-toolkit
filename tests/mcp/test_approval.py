@@ -142,3 +142,24 @@ def test_console_resolve_list_and_bad_input():
     assert len(q.pending()) == 1
     q.resolve(aid, Decision.DENIED)
     t.join(5)
+
+
+def test_on_resolved_fires_on_resolve_and_timeout_and_never_raises():
+    import threading
+    from carbon.core.execute import Decision
+    from carbon.mcp.approval import ApprovalQueue
+    seen = []
+    q = ApprovalQueue(timeout=0.2, on_resolved=lambda i, d: (seen.append((i, d)), 1 / 0))
+    assert q.request("t", {}) is Decision.TIMEOUT and len(seen) == 1
+    assert seen[0][1] is Decision.TIMEOUT
+    ids = []
+    q2 = ApprovalQueue(timeout=5, on_pending=lambda p: ids.append(p.id),
+                       on_resolved=lambda i, d: seen.append((i, d)))
+    t = threading.Thread(target=lambda: q2.request("t", {}), daemon=True)
+    t.start()
+    import time
+    while not ids:
+        time.sleep(0.01)
+    assert q2.resolve(ids[0], Decision.DENIED)
+    t.join(5)
+    assert seen[-1] == (ids[0], Decision.DENIED) and len(seen) == 2
