@@ -5,6 +5,11 @@ Containerized automotive pentest toolkit (v0.2): a CLI that drives a
 CAN bus and speaks UDS (ISO 14229) through a registry of tools, with an authorization guard for
 destructive actions and an append-only audit journal. Licensed GPL-3.0-or-later.
 
+## Documentation
+
+- [`docs/DESIGN.md`](docs/DESIGN.md) — architecture and design reference (English).
+- [`docs/GUIDE.md`](docs/GUIDE.md) — guide complet d'utilisation (français) : installation, concepts, parcours CAN/UDS, mode Guidé, mode Web, pilotage par IA.
+
 ## Install
 
 ### From source (Python >= 3.11)
