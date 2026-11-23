@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
 
 from textual import on
@@ -15,6 +16,7 @@ from textual.widgets import Button, Footer, Header, Input, OptionList, Static
 from carbon.core.execute import Decision, Origin
 from carbon.core.result import ToolResult
 from carbon.mcp.approval import ApprovalQueue, PendingApproval
+from carbon.tui.present import interpret, progress_rail, services_from_surface
 
 
 def parse_params(text: str) -> dict[str, Any]:
@@ -73,7 +75,17 @@ class CarbonApp(App):
     ApprovalModal { align: center middle; }
     #approval-box { width: 70; height: auto; border: heavy $warning; padding: 1 2;
                     background: $surface; }
-    #choices, #tools { height: auto; max-height: 12; }
+    #progress { padding: 0 1; height: 1; color: $text; }
+    #main-row { height: 1fr; }
+    #left-col { width: 2fr; padding: 0 1; }
+    #right-col { width: 1fr; padding: 0 1; }
+    #step { border: round $accent; padding: 1 2; height: auto; }
+    #status { color: $text-muted; padding: 0 2; height: 1; }
+    #choices, #tools { height: auto; max-height: 10; }
+    #result { color: $text-muted; height: auto; }
+    .panel-title { text-style: bold; color: $accent; padding: 1 0 0 0; }
+    #services { border: round $primary; padding: 0 1; height: auto; min-height: 5; }
+    #journal { border: round $primary-darken-1; padding: 0 1; height: 1fr; }
     """
     BINDINGS = [
         Binding("r", "run", "Exécuter"),
@@ -90,16 +102,25 @@ class CarbonApp(App):
         self.queue = queue if queue is not None else session.approver
         self.busy = False
         self.last_result: ToolResult | None = None
+        self.journal_lines: list[str] = []
 
     # ---- layout -----------------------------------------------------------
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Static(id="step")
-        yield Static(id="status")
-        yield OptionList(id="choices")
-        yield OptionList(id="tools")
-        yield Input(placeholder="paramètres : clé=valeur ...", id="params")
-        yield Static("(aucun résultat)", id="result")
+        yield Static(id="progress")
+        with Horizontal(id="main-row"):
+            with Vertical(id="left-col"):
+                yield Static(id="step")
+                yield Static(id="status")
+                yield OptionList(id="choices")
+                yield OptionList(id="tools")
+                yield Input(placeholder="paramètres : clé=valeur ...", id="params")
+                yield Static("(aucun résultat)", id="result")
+            with Vertical(id="right-col"):
+                yield Static("SERVICES", classes="panel-title")
+                yield Static("(rien découvert)", id="services")
+                yield Static("JOURNAL", classes="panel-title")
+                yield Static("", id="journal")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -120,24 +141,34 @@ class CarbonApp(App):
 
     # ---- view -------------------------------------------------------------
     def refresh_view(self) -> None:
-        m = self.session.state()["methodology"]
+        st = self.session.state()
+        m = st["methodology"]
         step_w, status_w = self.query_one("#step", Static), self.query_one("#status", Static)
         choices, tools = self.query_one("#choices", OptionList), self.query_one("#tools", OptionList)
         params = self.query_one("#params", Input)
+        self._refresh_services(st.get("surface") or {})
         if not m.get("loaded"):
+            self.query_one("#progress", Static).update("")
             step_w.update("Aucune méthodologie chargée.")
             status_w.update("")
             choices.display = tools.display = params.display = False
             return
         cur = m["current"]
         guided = m["mode"] == "guided"
-        self.sub_title = f"mode {'guidé' if guided else 'libre'}"
+        self.sub_title = f"mode {'accompagné' if guided else 'libre'}"
+        self.query_one("#progress", Static).update(progress_rail(cur["title"]))
         lines = [f"[b]{cur['title']}[/b]", cur["objective"].strip(),
                  f"outil suggéré : {cur['tool'] or '(étape informative, touche a)'}"]
         if not guided:
             lines.insert(0, "[b]Vue libre[/b] — position du parcours :")
             sugg = ", ".join(f"{c['id']} ({c['tool'] or 'info'})" for c in m["candidates"])
             lines.append(f"suggestions (non bloquantes) : {sugg or '-'}")
+        if self.last_result is not None:
+            r = self.last_result
+            colour = "green" if r.ok else "red"
+            mark = "✓" if r.ok else "✗"
+            lines.append(f"[{colour}]{mark} dernier : {r.tool} — "
+                         f"{interpret(r.to_dict())}[/]")
         step_w.update("\n".join(lines))
         status_w.update(f"étape {cur['id']} — "
                         + ("satisfaite" if m["satisfied"] else "non satisfaite"))
@@ -159,6 +190,18 @@ class CarbonApp(App):
 
     def _show_result(self, text: str) -> None:
         self.query_one("#result", Static).update(text)
+
+    def _refresh_services(self, surface: dict) -> None:
+        rows = services_from_surface(surface)
+        w = self.query_one("#services", Static)
+        if not rows:
+            w.update("[dim](rien découvert)[/]")
+            return
+        lines = []
+        for r in rows:
+            name = f"  [dim]{r['name']}[/]" if r["name"] else ""
+            lines.append(f"[b]{r['label']}[/]{name}")
+        w.update("\n".join(lines))
 
     # ---- actions ----------------------------------------------------------
     def action_toggle_mode(self) -> None:
@@ -246,7 +289,13 @@ class CarbonApp(App):
     def _run_done(self, result: ToolResult) -> None:
         self.busy = False
         self.last_result = result
-        data = json.dumps(result.data, ensure_ascii=False, indent=2, default=str)
+        ts = datetime.now().strftime("%H:%M:%S")
+        colour = "green" if result.ok else "red"
+        mark = "✓" if result.ok else "✗"
+        self.journal_lines.append(
+            f"[dim]{ts}[/] [{colour}]{mark}[/] {result.tool} — {interpret(result.to_dict())}")
+        self.journal_lines = self.journal_lines[-12:]
+        self.query_one("#journal", Static).update("\n".join(self.journal_lines))
         self._show_result(
-            f"{result.tool} : {'OK' if result.ok else 'ÉCHEC'}\n{result.summary}\n{data}")
+            f"{result.tool} : {'OK' if result.ok else 'ÉCHEC'} — {result.summary}")
         self.refresh_view()
