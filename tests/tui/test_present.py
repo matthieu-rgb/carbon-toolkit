@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from carbon.tui.present import (
     PHASES,
+    banner_for,
     interpret,
+    journal_entries,
     phase_of,
     progress_rail,
     services_from_surface,
@@ -52,6 +54,41 @@ def test_interpret_dtc_count_and_sniff():
 
 def test_interpret_unknown_tool_falls_back_to_summary():
     assert interpret({"tool": "mystery", "ok": True, "summary": "whatever"}) == "whatever"
+
+
+def test_banner_fires_on_security_unlock_only_when_ok():
+    assert banner_for(_r("uds_security_access", unlocked=True, level=1)) is not None
+    text, cls = banner_for(_r("uds_security_access", unlocked=True, level=1))
+    assert "DÉVERROUILLÉE" in text and cls == "banner-ok"
+    assert banner_for(_r("uds_security_access", ok=False, nrc="0x33")) is None
+
+
+def test_banner_fires_on_clear_dtc_and_read_did():
+    assert banner_for(_r("uds_clear_dtc"))[0].endswith("EFFACÉS")
+    assert "LU" in banner_for(_r("uds_read_did", did=0xF190, value="abcd"))[0]
+
+
+def test_banner_none_for_ordinary_tools():
+    assert banner_for(_r("uds_scan", supported=["0x10"])) is None
+
+
+def test_journal_entries_expand_seed_key_sequence():
+    seq = journal_entries(_r("uds_security_access", unlocked=True, seed="11223344", level=1))
+    assert len(seq) == 3
+    assert "requestSeed" in seq[0] and "11223344" in seq[0]
+    assert "sendKey" in seq[1]
+    assert "déverrouillé" in seq[2]
+
+
+def test_journal_entries_seed_key_refused():
+    seq = journal_entries(_r("uds_security_access", ok=False, seed="11223344", nrc="0x33"))
+    assert seq[-1].startswith("✗") and "0x33" in seq[-1]
+
+
+def test_journal_entries_single_line_for_other_tools():
+    assert journal_entries(_r("uds_scan", supported=["0x10", "0x27"])) == [
+        interpret(_r("uds_scan", supported=["0x10", "0x27"]))
+    ]
 
 
 def test_services_from_surface_lists_services_and_lock_state():

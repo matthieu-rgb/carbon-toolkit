@@ -16,7 +16,13 @@ from textual.widgets import Button, Footer, Header, Input, OptionList, Static
 from carbon.core.execute import Decision, Origin
 from carbon.core.result import ToolResult
 from carbon.mcp.approval import ApprovalQueue, PendingApproval
-from carbon.tui.present import interpret, progress_rail, services_from_surface
+from carbon.tui.present import (
+    banner_for,
+    interpret,
+    journal_entries,
+    progress_rail,
+    services_from_surface,
+)
 
 
 def parse_params(text: str) -> dict[str, Any]:
@@ -75,6 +81,8 @@ class CarbonApp(App):
     ApprovalModal { align: center middle; }
     #approval-box { width: 70; height: auto; border: heavy $warning; padding: 1 2;
                     background: $surface; }
+    #banner { display: none; height: 1; text-align: center; text-style: bold; }
+    #banner.banner-ok { display: block; background: $success; color: $text; }
     #progress { padding: 0 1; height: 1; color: $text; }
     #main-row { height: 1fr; }
     #left-col { width: 2fr; padding: 0 1; }
@@ -107,6 +115,7 @@ class CarbonApp(App):
     # ---- layout -----------------------------------------------------------
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Static("", id="banner")
         yield Static(id="progress")
         with Horizontal(id="main-row"):
             with Vertical(id="left-col"):
@@ -289,13 +298,22 @@ class CarbonApp(App):
     def _run_done(self, result: ToolResult) -> None:
         self.busy = False
         self.last_result = result
+        d = result.to_dict()
         ts = datetime.now().strftime("%H:%M:%S")
         colour = "green" if result.ok else "red"
-        mark = "✓" if result.ok else "✗"
-        self.journal_lines.append(
-            f"[dim]{ts}[/] [{colour}]{mark}[/] {result.tool} — {interpret(result.to_dict())}")
+        entries = journal_entries(d)
+        head = f"[dim]{ts}[/] [{colour}]{entries[0]}[/]"
+        block = "\n".join([head] + [f"         [{colour}]{e}[/]" for e in entries[1:]])
+        self.journal_lines.append(block)
         self.journal_lines = self.journal_lines[-12:]
         self.query_one("#journal", Static).update("\n".join(self.journal_lines))
+        milestone = banner_for(d)
+        if milestone:
+            text, cls = milestone
+            banner = self.query_one("#banner", Static)
+            banner.remove_class("banner-ok")
+            banner.add_class(cls)
+            banner.update(text)
         self._show_result(
             f"{result.tool} : {'OK' if result.ok else 'ÉCHEC'} — {result.summary}")
         self.refresh_view()

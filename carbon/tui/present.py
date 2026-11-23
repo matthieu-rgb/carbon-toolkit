@@ -96,6 +96,46 @@ _SERVICE_NAMES = {
 }
 
 
+def banner_for(result: dict[str, Any]) -> tuple[str, str] | None:
+    """A milestone banner (text, css-class) for a result, or None.
+
+    Milestones are the moments worth shouting about: a security unlock, DTCs
+    cleared, a protected DID read. They light up the top banner (wifite3's
+    "WPS PSK recovered" moment) and stay until the next milestone.
+    """
+    tool = result.get("tool", "")
+    ok = bool(result.get("ok"))
+    data = result.get("data") or {}
+    if not ok:
+        return None
+    if tool == "uds_security_access":
+        return (f"✓  SÉCURITÉ DÉVERROUILLÉE · niveau {data.get('level', '?')}", "banner-ok")
+    if tool == "uds_clear_dtc":
+        return ("✓  DTC EFFACÉS", "banner-ok")
+    if tool == "uds_read_did":
+        return (f"✓  DID 0x{_as_int(data.get('did')):X} LU · {data.get('value', '?')}", "banner-ok")
+    return None
+
+
+def journal_entries(result: dict[str, Any]) -> list[str]:
+    """One or more plain log lines for a result.
+
+    Seed-key is expanded into its challenge/response sequence (requestSeed →
+    sendKey → unlocked), which reads like wifite3's M1→M8 handshake; every other
+    tool is a single interpreted line.
+    """
+    tool = result.get("tool", "")
+    ok = bool(result.get("ok"))
+    data = result.get("data") or {}
+    if tool == "uds_security_access":
+        seed = data.get("seed", "?")
+        lines = [f"seed-key : requestSeed → seed {seed}", "  clé calculée → sendKey"]
+        lines.append(f"✓ niveau {data.get('level', '?')} déverrouillé" if ok
+                     else f"✗ refusé (NRC {data.get('nrc', '?')})")
+        return lines
+    return [interpret(result)]
+
+
 def services_from_surface(surface: dict[str, Any]) -> list[dict[str, str]]:
     """Service and security-level entries for the services panel, from the surface."""
     nodes = (surface or {}).get("nodes") or []
