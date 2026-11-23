@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections import deque
 from datetime import datetime
 from typing import Any
@@ -15,6 +16,7 @@ from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Header, Input, OptionList, Static
 
+from carbon.can.bus import open_bus
 from carbon.core.execute import Decision, Origin
 from carbon.core.result import ToolResult
 from carbon.mcp.approval import ApprovalQueue, PendingApproval
@@ -44,6 +46,43 @@ def parse_params(text: str) -> dict[str, Any]:
             except ValueError:
                 out[k] = v
     return out
+
+
+class _MeterSniffer:
+    """Background CAN reader that counts frames, so the rx meter reflects live bus
+    traffic (not only tool runs). Read-only: its own bus handle, never writes. If
+    the bus cannot be opened, it exits quietly and meters stay tool-driven.
+    """
+
+    def __init__(self, channel: str, interface: str, on_frame) -> None:
+        self._channel, self._interface, self._on_frame = channel, interface, on_frame
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True, name="meter-sniff")
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _loop(self) -> None:
+        try:
+            bus = open_bus(self._channel, self._interface)
+        except Exception:
+            return
+        try:
+            while not self._stop.is_set():
+                try:
+                    msg = bus.recv(timeout=0.2)
+                except Exception:
+                    break
+                if msg is not None:
+                    self._on_frame()
+        finally:
+            try:
+                bus.shutdown()
+            except Exception:
+                pass
 
 
 class ApprovalModal(ModalScreen[Decision]):
@@ -120,6 +159,7 @@ class CarbonApp(App):
         self.meters: dict[str, deque] = {
             k: deque([0] * 12, maxlen=24) for k in ("rx", "uds", "inject")}
         self._bucket: dict[str, int] = {"rx": 0, "uds": 0, "inject": 0}
+        self._sniffer: _MeterSniffer | None = None
 
     # ---- layout -----------------------------------------------------------
     def compose(self) -> ComposeResult:
@@ -147,6 +187,20 @@ class CarbonApp(App):
         self.refresh_view()
         self._render_meters()
         self.set_interval(0.5, self._tick)
+        # The passive rx sniffer attaches only to an out-of-process bus. The
+        # in-process "virtual" bus shares one queue, so a second consumer would
+        # steal/reorder frames from the tools themselves (and the tests).
+        if self.session.interface != "virtual":
+            self._sniffer = _MeterSniffer(
+                self.session.channel, self.session.interface, self._on_sniff_frame)
+            self._sniffer.start()
+
+    def on_unmount(self) -> None:
+        if self._sniffer is not None:
+            self._sniffer.stop()
+
+    def _on_sniff_frame(self) -> None:
+        self._bucket["rx"] += 1  # from the sniffer thread; plain int add is atomic
 
     # ---- live meters ------------------------------------------------------
     def _tick(self) -> None:
@@ -202,12 +256,14 @@ class CarbonApp(App):
         guided = m["mode"] == "guided"
         self.sub_title = f"mode {'accompagné' if guided else 'libre'}"
         self.query_one("#progress", Static).update(progress_rail(cur["title"]))
-        lines = [f"[b]{cur['title']}[/b]", cur["objective"].strip(),
-                 f"outil suggéré : {cur['tool'] or '(étape informative, touche a)'}"]
-        if not guided:
-            lines.insert(0, "[b]Vue libre[/b] — position du parcours :")
+        if guided:
+            lines = [f"[b]{cur['title']}[/b]", cur["objective"].strip(),
+                     f"outil suggéré : {cur['tool'] or '(étape informative, touche a)'}"]
+        else:
             sugg = ", ".join(f"{c['id']} ({c['tool'] or 'info'})" for c in m["candidates"])
-            lines.append(f"suggestions (non bloquantes) : {sugg or '-'}")
+            lines = [f"[b]Vue libre[/b] · position : {cur['title']}",
+                     f"suggestions : {sugg or '-'}",
+                     "lance un outil (touche c) ou reviens en Accompagné (touche m)"]
         if self.last_result is not None:
             r = self.last_result
             colour = "green" if r.ok else "red"
@@ -327,11 +383,9 @@ class CarbonApp(App):
         self.call_from_thread(self._run_done, result)
 
     def _bump_meter(self, result: ToolResult) -> None:
+        # rx is fed live by the background sniffer; here only the semantic counters.
         tool, data = result.tool, (result.data or {})
-        if tool in ("can_sniff", "can_dump"):
-            frames = data.get("frames")
-            self._bucket["rx"] += len(frames) if isinstance(frames, list) else int(frames or 0)
-        elif tool == "can_inject":
+        if tool == "can_inject":
             self._bucket["inject"] += 1
         elif tool == "can_replay":
             self._bucket["inject"] += int(data.get("frames") or 0) or 1
