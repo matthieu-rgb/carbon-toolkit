@@ -285,6 +285,9 @@ def build_cli(registry: Registry | None = None) -> click.Group:
     group.add_command(_build_mcp_group())
     group.add_command(_build_tui_command())
     group.add_command(_build_web_command())
+    from carbon.ctf.cli import build_ctf_group
+
+    group.add_command(build_ctf_group())
     return group
 
 
