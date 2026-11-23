@@ -198,6 +198,34 @@ def _build_tui_command() -> click.Command:
     return tui_cmd
 
 
+def _build_web_command() -> click.Command:
+    """`carbon web`: localhost Web client + MCP on one shared Session."""
+
+    @click.command("web", help="Localhost Web client (also serves /mcp with Bearer token).")
+    @click.option("--host", default="127.0.0.1", show_default=True,
+                  help="Bind address (loopback only).")
+    @click.option("--port", type=int, default=8800, show_default=True)
+    @click.option("--methodology", "methodology", default=None,
+                  type=click.Path(exists=True, dir_okay=False, path_type=Path),
+                  help="Optional methodology YAML (Web is Libre without it).")
+    @click.pass_context
+    def web_cmd(ctx, host, port, methodology):
+        from carbon.web.serve import serve_web
+
+        g = ctx.obj
+        if methodology is not None:
+            click.echo("note: --methodology is not yet used by the Web client", err=True)
+        try:
+            serve_web(channel=g["channel"], interface=g["interface"],
+                      journal_path=g["journal"], host=host, port=port)
+        except ValueError as exc:
+            raise click.ClickException(str(exc))
+        except KeyboardInterrupt:
+            pass
+
+    return web_cmd
+
+
 def open_guided_session(session_cls, methodology: Path, *, channel: str,
                         interface: str, journal_path: Path, approver=None):
     """Fresh session, or resume the saved position if the state file exists."""
@@ -232,6 +260,7 @@ def build_cli(registry: Registry | None = None) -> click.Group:
     group.add_command(_build_emu_group())
     group.add_command(_build_mcp_group())
     group.add_command(_build_tui_command())
+    group.add_command(_build_web_command())
     return group
 
 
