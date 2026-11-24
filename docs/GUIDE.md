@@ -28,6 +28,7 @@ référence d'architecture, voir [DESIGN.md](DESIGN.md) (en anglais).
 9. [Piloter CARBON avec une IA (MCP)](#9-piloter-carbon-avec-une-ia-mcp)
 10. [L'approbation des actions destructrices](#10-lapprobation-des-actions-destructrices)
 11. [Le journal d'audit](#11-le-journal-daudit)
+11bis. [S'entraîner avec les CTF](#11bis-sentrainer-avec-les-ctf)
 12. [Brancher du matériel réel](#12-brancher-du-materiel-reel)
 13. [Tests de fumée](#13-tests-de-fumee)
 14. [Dépannage](#14-depannage)
@@ -501,6 +502,35 @@ modale).
 **Le port Web est déjà pris.** Changez-le avec `carbon web --port <autre-port>`.
 
 ---
+
+## 11bis. S'entraîner avec les CTF
+
+CARBON propose un parcours de **challenges** (CTF) pour prendre en main l'outil
+en s'amusant, sur le calculateur simulé, sans matériel. Chaque challenge décrit
+un objectif ; tu le résous avec les **outils de CARBON** (scan, lecture de DID,
+session, seed-key…) et tu soumets un **flag** au format `CARBON{...}`. La
+validation est déterministe, la progression est enregistrée localement
+(`~/.carbon/ctf_progress.json`), et certains challenges se **débloquent** une
+fois leurs prérequis résolus.
+
+```bash
+carbon ctf list                         # les challenges et leur état
+carbon ctf start read-vin               # le briefing d'un challenge
+carbon ctf hint read-vin                # un indice (progressif)
+carbon ctf submit read-vin 'CARBON{...}'  # soumettre un flag
+carbon ctf status                       # progression et points
+carbon ctf reset <id>                   # recommencer un challenge
+```
+
+Déroulé type : lance le calculateur simulé dans un terminal
+(`carbon --interface udp_multicast --channel 239.74.163.7 emu start`), puis dans
+un autre terminal lis le briefing (`carbon ctf start ...`), résous avec les
+outils sur le même bus, et soumets ton flag. Les challenges couvrent la
+reconnaissance, la lecture de DID, les DTC, l'accès de sécurité (seed-key) et le
+rejeu de l'algorithme seed-key — du plus simple au plus avancé.
+
+Les flags sont stockés **hachés** (sha256) dans le dépôt : la réponse n'est pas
+lisible en clair dans les fichiers de challenge.
 
 ## 15. Licence
 
