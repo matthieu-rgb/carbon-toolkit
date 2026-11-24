@@ -21,13 +21,15 @@ from carbon.core.execute import Decision, Origin
 from carbon.core.result import ToolResult
 from carbon.mcp.approval import ApprovalQueue, PendingApproval
 from carbon.tui.present import (
+    action_card,
+    activity_rows,
     banner_for,
-    device_box,
-    interpret,
+    car_art,
+    ecu_info,
+    journal_block,
     journal_entries,
     progress_rail,
     services_from_surface,
-    sparkline,
 )
 
 
@@ -126,9 +128,11 @@ class CarbonApp(App):
                     background: $surface; }
     #banner { display: none; height: 1; text-align: center; text-style: bold; }
     #banner.banner-ok { display: block; background: $success; color: $text; }
-    #progress { padding: 0 1; height: 1; color: $text; }
-    #meters { padding: 0 1; height: 1; color: $text-muted; }
-    #device { height: auto; padding: 0 1; }
+    #progress { padding: 1 1 0 1; height: 2; color: $text; }
+    #instrument { height: 6; padding: 0 1; }
+    #car { width: 28; content-align: left middle; }
+    #activity { width: 1fr; padding: 1 2; content-align: left middle; }
+    #ecu { width: 32; border: round $primary; padding: 0 1; }
     #main-row { height: 1fr; }
     #left-col { width: 2fr; padding: 0 1; }
     #right-col { width: 1fr; padding: 0 1; }
@@ -166,7 +170,10 @@ class CarbonApp(App):
         yield Header()
         yield Static("", id="banner")
         yield Static(id="progress")
-        yield Static(id="meters")
+        with Horizontal(id="instrument"):
+            yield Static(id="car")
+            yield Static(id="activity")
+            yield Static(id="ecu")
         with Horizontal(id="main-row"):
             with Vertical(id="left-col"):
                 yield Static(id="step")
@@ -176,7 +183,6 @@ class CarbonApp(App):
                 yield Input(placeholder="paramètres : clé=valeur ...", id="params")
                 yield Static("(aucun résultat)", id="result")
             with Vertical(id="right-col"):
-                yield Static(id="device")
                 yield Static("SERVICES", classes="panel-title")
                 yield Static("(rien découvert)", id="services")
                 yield Static("JOURNAL", classes="panel-title")
@@ -185,7 +191,7 @@ class CarbonApp(App):
 
     def on_mount(self) -> None:
         self.refresh_view()
-        self._render_meters()
+        self._render_activity()
         self.set_interval(0.5, self._tick)
         # The passive rx sniffer attaches only to an out-of-process bus. The
         # in-process "virtual" bus shares one queue, so a second consumer would
@@ -207,18 +213,25 @@ class CarbonApp(App):
         for k, buf in self.meters.items():
             buf.append(self._bucket[k])
             self._bucket[k] = 0
-        self._render_meters()
+        self._render_activity()
 
-    def _render_meters(self) -> None:
+    def _render_activity(self) -> None:
         try:
-            meters_w = self.query_one("#meters", Static)
+            w = self.query_one("#activity", Static)
         except NoMatches:
             return  # timer may fire during mount/unmount transitions
         m = self.meters
-        meters_w.update(
-            f"CAN rx [green]{sparkline(m['rx'])}[/]   "
-            f"UDS [cyan]{sparkline(m['uds'])}[/]   "
-            f"inject [yellow]{sparkline(m['inject'])}[/]")
+        peak = max([max(buf) for buf in m.values()] + [1])
+
+        def latest(k: str) -> int:
+            return m[k][-1] if m[k] else 0
+
+        rows = [
+            ("CAN rx", "green", latest("rx"), peak, f"{latest('rx') * 2} /s"),
+            ("UDS", "cyan", latest("uds"), peak, f"{latest('uds') * 2} /s"),
+            ("inject", "yellow", latest("inject"), peak, f"{latest('inject') * 2} /s"),
+        ]
+        w.update(activity_rows(rows))
 
     # ---- approval bridge (called from the approver thread) ----------------
     def on_pending(self, pending: PendingApproval) -> None:
@@ -243,9 +256,8 @@ class CarbonApp(App):
         surf = st.get("surface") or {}
         self._refresh_services(surf)
         sess = surf.get("session") or {}
-        self.query_one("#device", Static).update(
-            device_box(unlocked=bool(sess.get("unlocked")),
-                       session=str(sess.get("active") or "")))
+        self.query_one("#ecu", Static).update(ecu_info(surf))
+        self.query_one("#car", Static).update(car_art(bool(sess.get("unlocked"))))
         if not m.get("loaded"):
             self.query_one("#progress", Static).update("")
             step_w.update("Aucune méthodologie chargée.")
@@ -256,21 +268,8 @@ class CarbonApp(App):
         guided = m["mode"] == "guided"
         self.sub_title = f"mode {'accompagné' if guided else 'libre'}"
         self.query_one("#progress", Static).update(progress_rail(cur["title"]))
-        if guided:
-            lines = [f"[b]{cur['title']}[/b]", cur["objective"].strip(),
-                     f"outil suggéré : {cur['tool'] or '(étape informative, touche a)'}"]
-        else:
-            sugg = ", ".join(f"{c['id']} ({c['tool'] or 'info'})" for c in m["candidates"])
-            lines = [f"[b]Vue libre[/b] - position : {cur['title']}",
-                     f"suggestions : {sugg or '-'}",
-                     "lance un outil (touche c) ou reviens en Accompagné (touche m)"]
-        if self.last_result is not None:
-            r = self.last_result
-            colour = "green" if r.ok else "red"
-            mark = "✓" if r.ok else "✗"
-            lines.append(f"[{colour}]{mark} dernier : {r.tool} - "
-                         f"{interpret(r.to_dict())}[/]")
-        step_w.update("\n".join(lines))
+        last = self.last_result.to_dict() if self.last_result is not None else None
+        step_w.update(action_card(m, last))
         status_w.update(f"étape {cur['id']} - "
                         + ("satisfaite" if m["satisfied"] else "non satisfaite"))
         choices.clear_options()
@@ -403,11 +402,8 @@ class CarbonApp(App):
         d = result.to_dict()
         self._bump_meter(result)
         ts = datetime.now().strftime("%H:%M:%S")
-        colour = "green" if result.ok else "red"
         entries = journal_entries(d)
-        head = f"[dim]{ts}[/] [{colour}]{entries[0]}[/]"
-        block = "\n".join([head] + [f"         [{colour}]{e}[/]" for e in entries[1:]])
-        self.journal_lines.append(block)
+        self.journal_lines.append(journal_block(ts, entries, result.ok))
         self.journal_lines = self.journal_lines[-12:]
         self.query_one("#journal", Static).update("\n".join(self.journal_lines))
         milestone = banner_for(d)

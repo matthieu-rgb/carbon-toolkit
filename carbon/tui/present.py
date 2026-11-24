@@ -96,35 +96,93 @@ _SERVICE_NAMES = {
 }
 
 
-_BLOCKS = "▁▂▃▄▅▆▇█"
+def hbar(value: float, maxval: float, width: int = 16) -> str:
+    """A horizontal fill bar, e.g. ``██████░░░░``, value scaled to maxval."""
+    maxval = max(float(maxval), 1.0)
+    fill = int(round(min(float(value), maxval) / maxval * width))
+    return "█" * fill + "░" * (width - fill)
 
 
-def sparkline(values: Any, width: int = 12) -> str:
-    """A block sparkline of the last ``width`` values, scaled to the window's max."""
-    vals = [float(v) for v in list(values)[-width:]]
-    vals = [0.0] * (width - len(vals)) + vals
-    hi = max(vals)
-    if hi <= 0:
-        return _BLOCKS[0] * width
+def activity_rows(rows: list[tuple[str, str, float, float, str]]) -> str:
+    """Stacked labelled activity bars (wifite-style), as rich markup.
+
+    Each row is ``(label, colour, value, maxval, rate_text)``.
+    """
     out = []
-    for v in vals:
-        idx = 0 if v <= 0 else min(len(_BLOCKS) - 1, 1 + int(v / hi * (len(_BLOCKS) - 2)))
-        out.append(_BLOCKS[idx])
-    return "".join(out)
+    for label, colour, value, maxval, rate in rows:
+        bar = hbar(value, maxval)
+        out.append(f"[dim]{label:<7}[/] [{colour}]{bar}[/] [dim]{rate:>8}[/]")
+    return "\n".join(out)
 
 
-def device_box(*, unlocked: bool, session: str | None) -> str:
-    """A compact pixel-style ECU card, colored by lock state (rich markup)."""
-    colour = "green" if unlocked else "red"
-    lock = "unlocked" if unlocked else "locked "
-    sess = (session or "-")[:9].ljust(9)
+def car_art(unlocked: bool) -> str:
+    """A small pixel car (the target), coloured by lock state, as rich markup."""
+    c = "green" if unlocked else "red"
+    # Note: a backslash must never sit directly before a markup tag ("\[" escapes
+    # the bracket in rich), so lines end on "/" or "_", not "\".
     return (
-        f"[{colour}]┌───────────┐[/]\n"
-        f"[{colour}]│[/] [b]ECU 0x7E8[/] [{colour}]│[/]\n"
-        f"[{colour}]│[/] 7E0->7E8  [{colour}]│[/]\n"
-        f"[{colour}]│[/] {sess}[{colour}]│[/]\n"
-        f"[{colour}]└──── {lock}─┘[/]"
+        f"[{c}]        ______________[/]\n"
+        f"[{c}]    ___/[/] [b]C A R B O N[/] [{c}]\\_[/]\n"
+        f"[{c}]   \\__________________/[/]\n"
+        f"[{c}]      (O)          (O)[/]"
     )
+
+
+def ecu_info(surface: dict[str, Any]) -> str:
+    """Compact ECU status (session, security, services) as rich markup."""
+    sess = (surface or {}).get("session") or {}
+    unlocked = bool(sess.get("unlocked"))
+    active = sess.get("active") or "-"
+    nodes = (surface or {}).get("nodes") or []
+    nsvc = sum(1 for n in nodes if n.get("type") == "service")
+    lock = "[b green]deverrouille[/]" if unlocked else "[b red]verrouille[/]"
+    return (f"[b]ECU 0x7E8[/]   [dim]7E0->7E8[/]\n"
+            f"[dim]session  [/] {active}\n"
+            f"[dim]securite [/] {lock}\n"
+            f"[dim]services [/] {nsvc}")
+
+
+def action_card(m: dict[str, Any], last: dict[str, Any] | None = None) -> str:
+    """The central 'what am I doing' card: which tool, why, the result, what next.
+
+    Reads as a labelled form (clear for a beginner) but stays dense (fine for an
+    expert). Works in both guided and libre mode.
+    """
+    cur = m["current"]
+    guided = m["mode"] == "guided"
+    tool = cur.get("tool")
+    cands = m.get("candidates") or []
+
+    head = ("[b yellow]ACCOMPAGNE[/]" if guided else "[b]LIBRE[/]")
+    lines = [f"{head}   [dim]etape[/]  {cur['title']}", ""]
+    lines.append(f"[dim]outil   [/] [b cyan]{tool or '(etape a valider - touche a)'}[/]")
+    if guided and cur.get("objective"):
+        lines.append(f"[dim]but     [/] {cur['objective'].strip()}")
+    if last is not None:
+        ok = bool(last.get("ok"))
+        colour, mark = ("green", "✓") if ok else ("red", "✗")
+        lines.append(f"[dim]resultat[/] [{colour}]{mark} {last.get('tool')} : "
+                     f"{interpret(last)}[/]")
+    if guided:
+        nxt = ", ".join(c.get("tool") or c.get("id") for c in cands) or "fin du parcours"
+        lines.append(f"[dim]suite   [/] [cyan]-> {nxt}[/]")
+    else:
+        sugg = ", ".join(f"{c['id']}" for c in cands) or "-"
+        lines.append(f"[dim]suite   [/] [cyan]lance un outil (c)[/]   "
+                     f"[dim]suggere : {sugg}[/]")
+    return "\n".join(lines)
+
+
+def journal_block(ts: str, entries: list[str], ok: bool) -> str:
+    """One journal entry as a small tree (wifite-style connectors)."""
+    colour = "green" if ok else "red"
+    lines = [f"[dim]{ts}[/] [{colour}]{entries[0]}[/]"]
+    mid, last = entries[1:-1], entries[1:]
+    for e in mid:
+        lines.append(f"       [dim]|[/] [{colour}]{e}[/]")
+    if len(entries) > 1:
+        lines.append(f"       [dim]`[/] [{colour}]{entries[-1]}[/]")
+    return "\n".join(lines)
 
 
 def banner_for(result: dict[str, Any]) -> tuple[str, str] | None:
