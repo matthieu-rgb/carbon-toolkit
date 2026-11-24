@@ -1,14 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from carbon.tui.present import (
     PHASES,
+    action_card,
+    activity_rows,
     banner_for,
-    device_box,
+    car_art,
+    ecu_info,
+    hbar,
     interpret,
+    journal_block,
     journal_entries,
     phase_of,
     progress_rail,
     services_from_surface,
-    sparkline,
 )
 
 
@@ -93,20 +97,71 @@ def test_journal_entries_single_line_for_other_tools():
     ]
 
 
-def test_sparkline_width_and_scaling():
-    assert len(sparkline([], width=12)) == 12
-    assert sparkline([0, 0, 0], width=3) == "▁▁▁"
-    line = sparkline([0, 5, 10], width=3)
-    assert len(line) == 3 and line[0] == "▁" and line[2] == "█"
-    # right-aligned padding when fewer values than width
-    assert sparkline([10], width=4).endswith("█") and sparkline([10], width=4)[0] == "▁"
+def test_hbar_fill_proportional():
+    assert hbar(0, 10, width=10) == "░" * 10
+    assert hbar(10, 10, width=10) == "█" * 10
+    half = hbar(5, 10, width=10)
+    assert half.count("█") == 5 and len(half) == 10
+    # value above max is clamped
+    assert hbar(99, 10, width=8) == "█" * 8
 
 
-def test_device_box_reflects_lock_state():
-    locked = device_box(unlocked=False, session=None)
-    assert "locked" in locked and "red" in locked
-    unlocked = device_box(unlocked=True, session="extended")
-    assert "unlocked" in unlocked and "green" in unlocked and "extended" in unlocked
+def test_activity_rows_has_labels_bars_and_rates():
+    out = activity_rows([("CAN rx", "green", 8, 8, "16 /s"),
+                         ("inject", "yellow", 0, 8, "0 /s")])
+    assert "CAN rx" in out and "inject" in out
+    assert "16 /s" in out and "green" in out and "█" in out
+
+
+def test_car_art_coloured_by_lock():
+    assert "C A R B O N" in car_art(True) and "green" in car_art(True)
+    assert "red" in car_art(False) and "green" not in car_art(False)
+
+
+def test_ecu_info_reports_session_security_services():
+    surface = {"session": {"active": "extended", "unlocked": True},
+               "nodes": [{"type": "service", "label": "0x10"},
+                         {"type": "service", "label": "0x27"}]}
+    out = ecu_info(surface)
+    assert "extended" in out and "deverrouille" in out and "services" in out and "2" in out
+    assert "verrouille" in ecu_info({"session": {"unlocked": False}})
+
+
+def _mstate(tool="uds_scan", title="3. Decouverte UDS", mode="guided", objective="decouvrir",
+            candidates=None):
+    return {"loaded": True, "mode": mode,
+            "current": {"id": "uds_scan", "title": title, "tool": tool, "objective": objective},
+            "candidates": candidates or [{"id": "uds_session", "title": "Session", "tool": "uds_session"}],
+            "pending_choice": False, "satisfied": True}
+
+
+def test_action_card_shows_tool_objective_and_next():
+    out = action_card(_mstate())
+    assert "uds_scan" in out            # which tool
+    assert "decouvrir" in out           # the objective (beginner)
+    assert "uds_session" in out         # what is next (how to progress)
+    assert "ACCOMPAGNE" in out
+
+
+def test_action_card_includes_interpreted_result():
+    last = {"tool": "uds_scan", "ok": True, "summary": "s", "data": {"supported": ["0x27"]}}
+    out = action_card(_mstate(), last)
+    assert "resultat" in out and "0x27" in out
+
+
+def test_action_card_libre_is_distinct():
+    out = action_card(_mstate(mode="libre"))
+    assert "LIBRE" in out and "uds_scan" in out
+
+
+def test_journal_block_is_a_tree_for_multiline():
+    block = journal_block("10:00:00", ["seed-key", "cle calculee", "deverrouille"], ok=True)
+    lines = block.splitlines()
+    assert len(lines) == 3
+    assert "10:00:00" in lines[0]
+    assert "|" in lines[1] and "`" in lines[2]  # tree connectors
+    # single-line entry stays one line
+    assert len(journal_block("10:00:00", ["6 services"], ok=True).splitlines()) == 1
 
 
 def test_services_from_surface_lists_services_and_lock_state():

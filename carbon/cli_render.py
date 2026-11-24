@@ -3,7 +3,7 @@
 
 Pure presentation. It reads the journal and derives a suggested next step; it
 never runs a tool (the single execution path stays in ``execute_tool``). Output
-is prettified only for an interactive terminal — the caller gates on
+is prettified only for an interactive terminal - the caller gates on
 ``isatty()`` and keeps the plain summary line for pipes, so scripts and tests
 are unaffected.
 """
@@ -29,7 +29,7 @@ _FLOW: list[tuple[str, str, str]] = [
 _ALL_DONE = ("carbon uds_clear_dtc --yes",
              "Effacer les DTC (destructif : confirmation requise)")
 
-_COMMANDS = "can_* · uds_* · emu · tui · web · mcp"
+_COMMANDS = "can_* - uds_* - emu - tui - web - mcp"
 
 
 def suggest_next(history: list[dict[str, Any]]) -> tuple[str, str]:
@@ -106,7 +106,7 @@ def render_result(console, result, history: list[dict[str, Any]]) -> None:
 
     cmd, why = suggest_next(history)
     body.append("\n\n")
-    body.append("→ Prochain  ", style="dim")
+    body.append("-> Prochain  ", style="dim")
     body.append(cmd, style=f"bold {accent}")
     body.append(f"   {why}", style="dim")
 
@@ -137,7 +137,7 @@ def render_dashboard(console, *, channel: str, interface: str,
     console.print()
     console.print(title)
     console.print(
-        Text(f"bus {channel} · interface {interface} · journal {journal_path}", style="dim")
+        Text(f"bus {channel} - interface {interface} - journal {journal_path}", style="dim")
     )
     console.print()
 
@@ -172,12 +172,12 @@ def render_dashboard(console, *, channel: str, interface: str,
     console.print()
     nxt = Text()
     nxt.append("Prochaine étape conseillée\n", style="bold")
-    nxt.append("  → ", style="dim")
+    nxt.append("  -> ", style="dim")
     nxt.append(cmd, style="bold green")
     nxt.append(f"\n     {why}", style="dim")
     console.print(nxt)
 
     console.print()
     console.print(Text(f"Commandes   {_COMMANDS}", style="dim"))
-    console.print(Text("Aide        carbon COMMANDE --help   ·   carbon doctor", style="dim"))
+    console.print(Text("Aide        carbon COMMANDE --help   -   carbon doctor", style="dim"))
     console.print()

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""`carbon ctf`: list, start, submit, hint, status, reset — a local challenge runner.
+"""`carbon ctf`: list, start, submit, hint, status, reset - a local challenge runner.
 
 Presentation + progress only; challenges are solved with CARBON's own tools and
 validated by deterministic flag match. No new execution path.
@@ -72,7 +72,7 @@ def build_ctf_group() -> click.Group:
         console = make_console()
         console.print(table)
         done = len(prog.solved_ids() & {c.id for c in challenges})
-        console.print(f"[dim]{done}/{len(challenges)} résolus · "
+        console.print(f"[dim]{done}/{len(challenges)} résolus - "
                       f"« carbon ctf start <id> » pour commencer[/]")
 
     @ctf.command("start", help="Afficher le briefing d'un challenge.")
@@ -85,10 +85,10 @@ def build_ctf_group() -> click.Group:
         c = _find(challenges, cid)
         if status_of(c, prog) == LOCKED:
             raise click.ClickException(
-                f"{cid} est verrouillé — résous d'abord : {', '.join(c.requires)}")
+                f"{cid} est verrouillé - résous d'abord : {', '.join(c.requires)}")
         scope = ", ".join(c.target.get("in_scope", []))
         body = c.briefing + (f"\n\n[dim]Outils en jeu : {scope}[/]" if scope else "")
-        make_console().print(Panel(body, title=f"[bold]{c.title}[/]  ·  {c.category}/{c.difficulty}",
+        make_console().print(Panel(body, title=f"[bold]{c.title}[/]  -  {c.category}/{c.difficulty}",
                                    title_align="left", border_style="cyan", padding=(1, 2)))
 
     @ctf.command("submit", help="Soumettre un flag.")
@@ -101,7 +101,7 @@ def build_ctf_group() -> click.Group:
         console = make_console()
         if status_of(c, prog) == LOCKED:
             raise click.ClickException(
-                f"{cid} est verrouillé — résous d'abord : {', '.join(c.requires)}")
+                f"{cid} est verrouillé - résous d'abord : {', '.join(c.requires)}")
         if check_flag(c, flag):
             before = {x.id for x in challenges if status_of(x, prog) == AVAILABLE}
             prog.mark_solved(c.id)
@@ -112,7 +112,7 @@ def build_ctf_group() -> click.Group:
                 console.print(f"[cyan]Débloqué :[/] {', '.join(newly)}")
         else:
             prog.record_attempt(c.id)
-            console.print(f"[red]✗ Flag incorrect.[/] Réessaie — « carbon ctf hint {cid} » "
+            console.print(f"[red]✗ Flag incorrect.[/] Réessaie - « carbon ctf hint {cid} » "
                           f"pour un indice.")
             ctx.exit(1)
 
@@ -139,7 +139,7 @@ def build_ctf_group() -> click.Group:
         console = make_console()
         solved = prog.solved_ids() & {c.id for c in challenges}
         pts = sum(c.points for c in challenges if c.id in solved)
-        console.print(f"[b]Progression[/] : {len(solved)}/{len(challenges)} résolus · {pts} pts")
+        console.print(f"[b]Progression[/] : {len(solved)}/{len(challenges)} résolus - {pts} pts")
         cats: dict[str, list[int]] = {}
         for c in challenges:
             d, t = cats.setdefault(c.category, [0, 0]), None

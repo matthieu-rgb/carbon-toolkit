@@ -2,8 +2,8 @@
 """CARBON CTF: declarative challenges played against the simulated ECU.
 
 Challenges describe a goal and a flag; the player reaches the flag using CARBON's
-own tools (uds_scan, uds_session, uds_security_access, …). The runner validates
-a submitted flag deterministically and tracks progress locally — no server, no
+own tools (uds_scan, uds_session, uds_security_access, ...). The runner validates
+a submitted flag deterministically and tracks progress locally - no server, no
 new execution path, challenge logic stays in the simulated ECU.
 """
 from carbon.ctf.model import Challenge, Hint, check_flag, load_challenges, normalize

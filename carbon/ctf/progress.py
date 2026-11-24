@@ -15,7 +15,7 @@ from typing import Any
 
 
 def default_progress_path() -> Path:
-    """``$CARBON_HOME`` or ``~/.carbon`` → ``ctf_progress.json``."""
+    """``$CARBON_HOME`` or ``~/.carbon`` -> ``ctf_progress.json``."""
     base = os.environ.get("CARBON_HOME")
     root = Path(base) if base else Path.home() / ".carbon"
     return root / "ctf_progress.json"

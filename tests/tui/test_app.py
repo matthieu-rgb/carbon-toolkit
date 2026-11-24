@@ -173,7 +173,7 @@ def test_mode_toggle_keeps_position(channel, tmp_path):
             assert cur(app) == "recon"
             await pilot.press("m")
             assert app.session.mode == "libre" and cur(app) == "recon"
-            assert "Vue libre" in str(app.query_one("#step").render())
+            assert "LIBRE" in str(app.query_one("#step").render())
             assert app.query_one("#tools").display
             await pilot.press("m")
             assert app.session.mode == "guided" and cur(app) == "recon"
