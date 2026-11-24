@@ -123,6 +123,7 @@ class ApprovalModal(ModalScreen[Decision]):
 class CarbonApp(App):
     TITLE = "CARBON"
     CSS = """
+    Screen { background: #26272c; }
     ApprovalModal { align: center middle; }
     #approval-box { width: 70; height: auto; border: heavy $warning; padding: 1 2;
                     background: $surface; }
