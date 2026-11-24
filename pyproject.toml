@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "carbon"
-version = "0.5.0"
+version = "0.7.0"
 description = "CARBON - containerized automotive pentest toolkit"
 requires-python = ">=3.11"
 license = { text = "GPL-3.0-or-later" }
@@ -19,6 +19,7 @@ dependencies = [
     "PyYAML==6.0.4",  # methodology YAML (yaml.safe_load only)
     "textual==8.2.8",  # TUI (guided/libre views)
     "starlette==1.10.0",  # Web client ASGI app (direct dep, was transitive via mcp)
+    "rich>=14.2.0",  # CLI result panels + dashboard (direct dep, also used by textual)
 ]
 
 [project.scripts]
@@ -36,3 +37,4 @@ testpaths = ["tests"]
 [tool.setuptools.package-data]
 "carbon.methodology.trees" = ["*.yaml"]
 "carbon.web.static" = ["*.html", "*.js", "*.css", "vendor/*"]
+"carbon.ctf.challenges" = ["*.yaml"]

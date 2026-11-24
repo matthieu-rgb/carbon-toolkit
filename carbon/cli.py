@@ -94,7 +94,14 @@ def _make_command(adapter) -> click.Command:
             )
         except JournalError as exc:
             raise click.ClickException(f"{adapter.name} executed but {exc}")
-        click.echo(result.summary)
+        if sys.stdout.isatty():
+            from carbon import cli_render
+            history = cli_render.read_journal(g["journal"])
+            cli_render.render_result(cli_render.make_console(), result, history)
+        else:
+            # Piped/non-interactive: keep the plain summary line so scripts and
+            # tests that grep stdout are unaffected.
+            click.echo(result.summary)
         if not result.ok:
             ctx.exit(1)
 
@@ -240,10 +247,19 @@ def open_guided_session(session_cls, methodology: Path, *, channel: str,
     return session
 
 
+def _version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("carbon")
+    except Exception:
+        return "0.6.0"
+
+
 def build_cli(registry: Registry | None = None) -> click.Group:
     registry = registry or build_registry()
 
-    @click.group(help="CARBON automotive pentest toolkit.")
+    @click.group(help="CARBON automotive pentest toolkit.", invoke_without_command=True)
     @click.option("--channel", default="vcan0", show_default=True)
     @click.option("--interface", default="socketcan", show_default=True)
     @click.option(
@@ -254,6 +270,14 @@ def build_cli(registry: Registry | None = None) -> click.Group:
     @click.pass_context
     def group(ctx, channel, interface, journal, yes):
         ctx.obj = {"channel": channel, "interface": interface, "journal": journal, "yes": yes}
+        if ctx.invoked_subcommand is None:
+            # No subcommand: show the dashboard instead of a bare usage dump.
+            from carbon import cli_render
+
+            cli_render.render_dashboard(
+                cli_render.make_console(), channel=channel, interface=interface,
+                journal_path=journal, version=_version(),
+            )
 
     for name in registry.names():
         group.add_command(_make_command(registry.get(name)))
@@ -261,6 +285,9 @@ def build_cli(registry: Registry | None = None) -> click.Group:
     group.add_command(_build_mcp_group())
     group.add_command(_build_tui_command())
     group.add_command(_build_web_command())
+    from carbon.ctf.cli import build_ctf_group
+
+    group.add_command(build_ctf_group())
     return group
 
 

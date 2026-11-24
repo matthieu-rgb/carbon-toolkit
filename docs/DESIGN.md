@@ -329,12 +329,19 @@ v0.4  GUIDED       YAML methodology engine, steps 1-6, persistent state, TUI
 v0.5  WEB + MAP    Web client (same process), attack-surface map
                    (cytoscape.js, build_surface projection), SSE+POST,
                    click-to-run Libre, Web destructive approval
+v0.6  CLI / TUI    Readable result panels, no-command dashboard, next-step
+                   hints; a live, visual Textual TUI (CAN/UDS activity graphs,
+                   colored event log, bus/ECU device panels, action tabs)
+v0.7  CTF          Declarative challenges on the simulated ECU: a `carbon ctf`
+                   runner (list/start/submit/hint/status), deterministic flag
+                   validation (exact/regex/sha256), prerequisite gating, local
+                   progress. Challenges are solved with CARBON's own tools.
 v1.0  REPORTING    Exportable session report, docs + manual
 v1.x  EXTENSIONS   Automotive Ethernet (DoIP), Wi-Fi/BLE, embedded agent
 v2+   EXTENSIONS   CAN-FD, SOME/IP, firmware reverse, advanced Pi probe
 ```
 
-v0.1 → v0.5 are delivered. Guided mode in the Web client, and the session
+v0.1 → v0.5 are delivered; v0.6 (CLI/TUI experience) and v0.7 (CTF) are in progress. Guided mode in the Web client, and the session
 report, are the next milestones.
 
 ---

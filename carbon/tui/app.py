@@ -3,18 +3,32 @@
 from __future__ import annotations
 
 import json
+import threading
+from collections import deque
+from datetime import datetime
 from typing import Any
 
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Header, Input, OptionList, Static
 
+from carbon.can.bus import open_bus
 from carbon.core.execute import Decision, Origin
 from carbon.core.result import ToolResult
 from carbon.mcp.approval import ApprovalQueue, PendingApproval
+from carbon.tui.present import (
+    banner_for,
+    device_box,
+    interpret,
+    journal_entries,
+    progress_rail,
+    services_from_surface,
+    sparkline,
+)
 
 
 def parse_params(text: str) -> dict[str, Any]:
@@ -32,6 +46,43 @@ def parse_params(text: str) -> dict[str, Any]:
             except ValueError:
                 out[k] = v
     return out
+
+
+class _MeterSniffer:
+    """Background CAN reader that counts frames, so the rx meter reflects live bus
+    traffic (not only tool runs). Read-only: its own bus handle, never writes. If
+    the bus cannot be opened, it exits quietly and meters stay tool-driven.
+    """
+
+    def __init__(self, channel: str, interface: str, on_frame) -> None:
+        self._channel, self._interface, self._on_frame = channel, interface, on_frame
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True, name="meter-sniff")
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _loop(self) -> None:
+        try:
+            bus = open_bus(self._channel, self._interface)
+        except Exception:
+            return
+        try:
+            while not self._stop.is_set():
+                try:
+                    msg = bus.recv(timeout=0.2)
+                except Exception:
+                    break
+                if msg is not None:
+                    self._on_frame()
+        finally:
+            try:
+                bus.shutdown()
+            except Exception:
+                pass
 
 
 class ApprovalModal(ModalScreen[Decision]):
@@ -73,7 +124,21 @@ class CarbonApp(App):
     ApprovalModal { align: center middle; }
     #approval-box { width: 70; height: auto; border: heavy $warning; padding: 1 2;
                     background: $surface; }
-    #choices, #tools { height: auto; max-height: 12; }
+    #banner { display: none; height: 1; text-align: center; text-style: bold; }
+    #banner.banner-ok { display: block; background: $success; color: $text; }
+    #progress { padding: 0 1; height: 1; color: $text; }
+    #meters { padding: 0 1; height: 1; color: $text-muted; }
+    #device { height: auto; padding: 0 1; }
+    #main-row { height: 1fr; }
+    #left-col { width: 2fr; padding: 0 1; }
+    #right-col { width: 1fr; padding: 0 1; }
+    #step { border: round $accent; padding: 1 2; height: auto; }
+    #status { color: $text-muted; padding: 0 2; height: 1; }
+    #choices, #tools { height: auto; max-height: 10; }
+    #result { color: $text-muted; height: auto; }
+    .panel-title { text-style: bold; color: $accent; padding: 1 0 0 0; }
+    #services { border: round $primary; padding: 0 1; height: auto; min-height: 5; }
+    #journal { border: round $primary-darken-1; padding: 0 1; height: 1fr; }
     """
     BINDINGS = [
         Binding("r", "run", "Exécuter"),
@@ -90,20 +155,70 @@ class CarbonApp(App):
         self.queue = queue if queue is not None else session.approver
         self.busy = False
         self.last_result: ToolResult | None = None
+        self.journal_lines: list[str] = []
+        self.meters: dict[str, deque] = {
+            k: deque([0] * 12, maxlen=24) for k in ("rx", "uds", "inject")}
+        self._bucket: dict[str, int] = {"rx": 0, "uds": 0, "inject": 0}
+        self._sniffer: _MeterSniffer | None = None
 
     # ---- layout -----------------------------------------------------------
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Static(id="step")
-        yield Static(id="status")
-        yield OptionList(id="choices")
-        yield OptionList(id="tools")
-        yield Input(placeholder="paramètres : clé=valeur ...", id="params")
-        yield Static("(aucun résultat)", id="result")
+        yield Static("", id="banner")
+        yield Static(id="progress")
+        yield Static(id="meters")
+        with Horizontal(id="main-row"):
+            with Vertical(id="left-col"):
+                yield Static(id="step")
+                yield Static(id="status")
+                yield OptionList(id="choices")
+                yield OptionList(id="tools")
+                yield Input(placeholder="paramètres : clé=valeur ...", id="params")
+                yield Static("(aucun résultat)", id="result")
+            with Vertical(id="right-col"):
+                yield Static(id="device")
+                yield Static("SERVICES", classes="panel-title")
+                yield Static("(rien découvert)", id="services")
+                yield Static("JOURNAL", classes="panel-title")
+                yield Static("", id="journal")
         yield Footer()
 
     def on_mount(self) -> None:
         self.refresh_view()
+        self._render_meters()
+        self.set_interval(0.5, self._tick)
+        # The passive rx sniffer attaches only to an out-of-process bus. The
+        # in-process "virtual" bus shares one queue, so a second consumer would
+        # steal/reorder frames from the tools themselves (and the tests).
+        if self.session.interface != "virtual":
+            self._sniffer = _MeterSniffer(
+                self.session.channel, self.session.interface, self._on_sniff_frame)
+            self._sniffer.start()
+
+    def on_unmount(self) -> None:
+        if self._sniffer is not None:
+            self._sniffer.stop()
+
+    def _on_sniff_frame(self) -> None:
+        self._bucket["rx"] += 1  # from the sniffer thread; plain int add is atomic
+
+    # ---- live meters ------------------------------------------------------
+    def _tick(self) -> None:
+        for k, buf in self.meters.items():
+            buf.append(self._bucket[k])
+            self._bucket[k] = 0
+        self._render_meters()
+
+    def _render_meters(self) -> None:
+        try:
+            meters_w = self.query_one("#meters", Static)
+        except NoMatches:
+            return  # timer may fire during mount/unmount transitions
+        m = self.meters
+        meters_w.update(
+            f"CAN rx [green]{sparkline(m['rx'])}[/]   "
+            f"UDS [cyan]{sparkline(m['uds'])}[/]   "
+            f"inject [yellow]{sparkline(m['inject'])}[/]")
 
     # ---- approval bridge (called from the approver thread) ----------------
     def on_pending(self, pending: PendingApproval) -> None:
@@ -120,24 +235,41 @@ class CarbonApp(App):
 
     # ---- view -------------------------------------------------------------
     def refresh_view(self) -> None:
-        m = self.session.state()["methodology"]
+        st = self.session.state()
+        m = st["methodology"]
         step_w, status_w = self.query_one("#step", Static), self.query_one("#status", Static)
         choices, tools = self.query_one("#choices", OptionList), self.query_one("#tools", OptionList)
         params = self.query_one("#params", Input)
+        surf = st.get("surface") or {}
+        self._refresh_services(surf)
+        sess = surf.get("session") or {}
+        self.query_one("#device", Static).update(
+            device_box(unlocked=bool(sess.get("unlocked")),
+                       session=str(sess.get("active") or "")))
         if not m.get("loaded"):
+            self.query_one("#progress", Static).update("")
             step_w.update("Aucune méthodologie chargée.")
             status_w.update("")
             choices.display = tools.display = params.display = False
             return
         cur = m["current"]
         guided = m["mode"] == "guided"
-        self.sub_title = f"mode {'guidé' if guided else 'libre'}"
-        lines = [f"[b]{cur['title']}[/b]", cur["objective"].strip(),
-                 f"outil suggéré : {cur['tool'] or '(étape informative, touche a)'}"]
-        if not guided:
-            lines.insert(0, "[b]Vue libre[/b] — position du parcours :")
+        self.sub_title = f"mode {'accompagné' if guided else 'libre'}"
+        self.query_one("#progress", Static).update(progress_rail(cur["title"]))
+        if guided:
+            lines = [f"[b]{cur['title']}[/b]", cur["objective"].strip(),
+                     f"outil suggéré : {cur['tool'] or '(étape informative, touche a)'}"]
+        else:
             sugg = ", ".join(f"{c['id']} ({c['tool'] or 'info'})" for c in m["candidates"])
-            lines.append(f"suggestions (non bloquantes) : {sugg or '-'}")
+            lines = [f"[b]Vue libre[/b] · position : {cur['title']}",
+                     f"suggestions : {sugg or '-'}",
+                     "lance un outil (touche c) ou reviens en Accompagné (touche m)"]
+        if self.last_result is not None:
+            r = self.last_result
+            colour = "green" if r.ok else "red"
+            mark = "✓" if r.ok else "✗"
+            lines.append(f"[{colour}]{mark} dernier : {r.tool} — "
+                         f"{interpret(r.to_dict())}[/]")
         step_w.update("\n".join(lines))
         status_w.update(f"étape {cur['id']} — "
                         + ("satisfaite" if m["satisfied"] else "non satisfaite"))
@@ -159,6 +291,18 @@ class CarbonApp(App):
 
     def _show_result(self, text: str) -> None:
         self.query_one("#result", Static).update(text)
+
+    def _refresh_services(self, surface: dict) -> None:
+        rows = services_from_surface(surface)
+        w = self.query_one("#services", Static)
+        if not rows:
+            w.update("[dim](rien découvert)[/]")
+            return
+        lines = []
+        for r in rows:
+            name = f"  [dim]{r['name']}[/]" if r["name"] else ""
+            lines.append(f"[b]{r['label']}[/]{name}")
+        w.update("\n".join(lines))
 
     # ---- actions ----------------------------------------------------------
     def action_toggle_mode(self) -> None:
@@ -238,6 +382,16 @@ class CarbonApp(App):
             return
         self.call_from_thread(self._run_done, result)
 
+    def _bump_meter(self, result: ToolResult) -> None:
+        # rx is fed live by the background sniffer; here only the semantic counters.
+        tool, data = result.tool, (result.data or {})
+        if tool == "can_inject":
+            self._bucket["inject"] += 1
+        elif tool == "can_replay":
+            self._bucket["inject"] += int(data.get("frames") or 0) or 1
+        elif tool.startswith("uds_"):
+            self._bucket["uds"] += 1
+
     def _run_failed(self, tool: str, exc: Exception) -> None:
         self.busy = False
         self._show_result(f"{tool} : erreur {exc}")
@@ -246,7 +400,23 @@ class CarbonApp(App):
     def _run_done(self, result: ToolResult) -> None:
         self.busy = False
         self.last_result = result
-        data = json.dumps(result.data, ensure_ascii=False, indent=2, default=str)
+        d = result.to_dict()
+        self._bump_meter(result)
+        ts = datetime.now().strftime("%H:%M:%S")
+        colour = "green" if result.ok else "red"
+        entries = journal_entries(d)
+        head = f"[dim]{ts}[/] [{colour}]{entries[0]}[/]"
+        block = "\n".join([head] + [f"         [{colour}]{e}[/]" for e in entries[1:]])
+        self.journal_lines.append(block)
+        self.journal_lines = self.journal_lines[-12:]
+        self.query_one("#journal", Static).update("\n".join(self.journal_lines))
+        milestone = banner_for(d)
+        if milestone:
+            text, cls = milestone
+            banner = self.query_one("#banner", Static)
+            banner.remove_class("banner-ok")
+            banner.add_class(cls)
+            banner.update(text)
         self._show_result(
-            f"{result.tool} : {'OK' if result.ok else 'ÉCHEC'}\n{result.summary}\n{data}")
+            f"{result.tool} : {'OK' if result.ok else 'ÉCHEC'} — {result.summary}")
         self.refresh_view()
