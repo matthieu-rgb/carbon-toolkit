@@ -250,3 +250,19 @@ With no browser or curl: it starts `carbon web` on a virtual channel, follows
 the bootstrap link, checks that `/api/state` is refused without the cookie then
 returns `surface` and `tools` with it, that the link is single-use and that the
 Web cookie does not open `/mcp`, then prints `WEB OK`.
+
+## Challenges (CTF)
+
+A built-in challenge track to learn the toolkit by playing, on the simulated
+ECU, offline. Each challenge states a goal; you reach the flag (`CARBON{...}`)
+using CARBON's own tools and submit it. Flags are validated deterministically,
+progress is stored locally, and some challenges unlock once their prerequisites
+are solved. Shipped flags are stored hashed (sha256), not in clear.
+
+    carbon ctf list                          # challenges and their status
+    carbon ctf start read-vin                # a challenge briefing
+    carbon ctf hint read-vin                 # a progressive hint
+    carbon ctf submit read-vin 'CARBON{...}' # submit a flag
+    carbon ctf status                        # progress and points
+
+See the French guide (`docs/GUIDE.md`) for a worked example.

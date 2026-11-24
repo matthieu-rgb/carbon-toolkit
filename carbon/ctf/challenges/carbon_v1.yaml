@@ -1,0 +1,184 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# CARBON CTF — parcours v1, jouable sur le calculateur simulé (carbon emu start).
+# Les flags sont stockés hachés (sha256) : la réponse n'est pas en clair ici.
+# On résout chaque challenge avec les outils de CARBON (uds_scan, uds_session,
+# uds_security_access, uds_read_did, uds_read_dtc…), pas un shell dédié.
+# Format de flag attendu : CARBON{...}
+
+- id: recon-sec-service
+  title: "Repérer le service de sécurité"
+  category: recon
+  difficulty: intro
+  points: 50
+  briefing: |
+    Le calculateur répond en 0x7E8. Scanne ses services de diagnostic et
+    identifie celui qui contrôle l'accès de sécurité (le verrou du seed-key).
+    Soumets son identifiant de service sous la forme CARBON{0x..}.
+  target:
+    ecu_response: "0x7E8"
+    in_scope: ["uds_scan"]
+  flag:
+    match: hash
+    sha256: "1a3e6cebff3e66e2adcc2d3266a1f4ad6c03962201dc586fc122d116abd9b842"
+  hints:
+    - text: "Lance uds_scan : il liste les services qui répondent."
+    - text: "Le service d'accès de sécurité UDS porte le SID 0x27 (SecurityAccess)."
+      cost: 25
+
+- id: read-vin
+  title: "Lire le VIN"
+  category: uds
+  difficulty: intro
+  points: 50
+  briefing: |
+    Le VIN du véhicule est stocké dans un identifiant de données (DID) ouvert.
+    Lis-le et soumets sa valeur ASCII sous la forme CARBON{...}.
+  target:
+    did: "0xF190"
+    in_scope: ["uds_read_did"]
+  flag:
+    match: hash
+    sha256: "0b2a556de6f78f542237ff6fb3e03501e2c8d52d57887a3f43478216dfc43a7e"
+  hints:
+    - text: "Le DID 0xF190 est la convention pour le VIN. Lis-le avec uds_read_did."
+    - text: "uds_read_did renvoie la valeur en hexadécimal : décode-la en texte ASCII."
+      cost: 25
+
+- id: dump-dtcs
+  title: "Relever les codes défaut"
+  category: dtc
+  difficulty: easy
+  points: 75
+  briefing: |
+    Le calculateur a des codes défaut (DTC) en mémoire. Récupère-les et soumets
+    leurs codes, en hexadécimal minuscule, séparés par une virgule, dans l'ordre
+    renvoyé : CARBON{aaaaaa,bbbbbb}.
+  target:
+    in_scope: ["uds_read_dtc"]
+  flag:
+    match: hash
+    sha256: "80f50e96bd7083d75ddfb95a8e7ef5a3ce13b1b2f512f5fe37342c16459d8921"
+  hints:
+    - text: "uds_read_dtc (service 0x19) lit les DTC par masque de statut."
+    - text: "Deux DTC sont stockés ; concatène leurs codes séparés d'une virgule."
+      cost: 25
+
+- id: unlock-protected
+  title: "Déverrouiller la donnée protégée"
+  category: securityaccess
+  difficulty: easy
+  points: 100
+  requires: [recon-sec-service, read-vin]
+  briefing: |
+    Le DID 0x1234 contient une valeur protégée. Le lire directement est refusé
+    (NRC 0x33). Entre dans la bonne session, passe l'accès de sécurité, puis
+    lis-le. Soumets la valeur sous la forme CARBON{...}.
+  target:
+    did: "0x1234"
+    in_scope: ["uds_session", "uds_security_access", "uds_read_did"]
+  flag:
+    match: hash
+    sha256: "0661eb9ace8bd00407ad467f2113b5518150036b9b734086c0e5cf8bfd248e67"
+  hints:
+    - text: "Une lecture directe renvoie NRC 0x33 (securityAccessDenied)."
+    - text: "Ouvre une session étendue (uds_session) avant uds_security_access."
+    - text: "Une fois déverrouillé, relis le DID 0x1234 : sa valeur est la réponse."
+      cost: 50
+
+- id: seed-key-algo
+  title: "Rejouer l'algorithme seed-key"
+  category: reversing
+  difficulty: medium
+  points: 150
+  requires: [unlock-protected]
+  briefing: |
+    L'accès de sécurité est un défi-réponse : le calculateur envoie une graine,
+    tu renvoies une clé calculée. Pour la graine fixe 0x11223344, calcule la clé
+    attendue et soumets-la sous la forme CARBON{........} (8 chiffres hex).
+  target:
+    seed: "0x11223344"
+  flag:
+    match: hash
+    sha256: "51e3a80bddaa2bd61a4f17f36a5d992bffcbeb267f0fd643f36d8581fa77feff"
+  hints:
+    - text: "clé = rotation_gauche_32bits(graine XOR 0xA5A5A5A5, 3 bits)."
+    - text: "Pour 0x11223344 : XOR 0xA5A5A5A5 puis rotation à gauche de 3 bits."
+      cost: 50
+
+- id: count-services
+  title: "Cartographier la surface"
+  category: recon
+  difficulty: easy
+  points: 75
+  briefing: |
+    Combien de services de diagnostic UDS le calculateur prend-il en charge ?
+    Scanne-le et soumets le nombre : CARBON{N}.
+  target:
+    in_scope: ["uds_scan"]
+  flag:
+    match: hash
+    sha256: "56f6453e5f14f4d2fbbca0380a084f3f1a51e87d5f3b1839f22e4a91c74335da"
+  hints:
+    - text: "uds_scan distingue les services supportés de ceux en NRC 0x11."
+    - text: "Compte uniquement les services qui répondent positivement."
+      cost: 25
+
+- id: locked-read
+  title: "Lire le code de refus"
+  category: uds
+  difficulty: easy
+  points: 100
+  requires: [read-vin]
+  briefing: |
+    Essaie de lire le DID protégé 0x1234 sans rien déverrouiller. Le calculateur
+    refuse avec un code de réponse négative (NRC). Soumets ce code : CARBON{0x..}.
+  target:
+    did: "0x1234"
+    in_scope: ["uds_read_did"]
+  flag:
+    match: hash
+    sha256: "872646c0b4ecf0e9f6a2d87097138f9ed368b36eb7fd50bc336daf248ba284a4"
+  hints:
+    - text: "uds_read_did sur un DID protégé renvoie un NRC dans le résultat."
+    - text: "securityAccessDenied porte le code 0x33."
+      cost: 25
+
+- id: seed-key-generic
+  title: "Maîtriser l'algorithme"
+  category: reversing
+  difficulty: hard
+  points: 200
+  requires: [seed-key-algo]
+  briefing: |
+    Tu connais l'algorithme seed-key. Prouve que tu le maîtrises pour n'importe
+    quelle graine : calcule la clé pour la graine 0xCAFEBABE et soumets-la sous
+    la forme CARBON{........} (8 chiffres hex).
+  target:
+    seed: "0xCAFEBABE"
+  flag:
+    match: hash
+    sha256: "b838b55639a1f5b4b119f6d3f61c6e51fa10869659dda57b6b4371955013934c"
+  hints:
+    - text: "Même transformation que pour la graine d'exemple : XOR puis rotation."
+    - text: "clé = rotation_gauche_32bits(0xCAFEBABE XOR 0xA5A5A5A5, 3 bits)."
+      cost: 75
+
+- id: capstone
+  title: "Chaîne complète"
+  category: securityaccess
+  difficulty: hard
+  points: 250
+  requires: [unlock-protected, seed-key-algo]
+  briefing: |
+    Épreuve finale. Déverrouille et lis la valeur protégée (0x1234), et calcule
+    la clé seed-key pour la graine 0x11223344. Soumets les deux, la valeur puis
+    la clé, séparées par deux-points : CARBON{valeur:cle}.
+  target:
+    in_scope: ["uds_session", "uds_security_access", "uds_read_did"]
+  flag:
+    match: hash
+    sha256: "0a77b543c562b9ab16713f12a73a462ba2a932e507b0239f929f9f8327dc13c1"
+  hints:
+    - text: "Reprends unlock-protected pour la valeur, seed-key-algo pour la clé."
+    - text: "Format exact : CARBON{<valeur hex>:<clé hex>} en minuscules."
+      cost: 100
