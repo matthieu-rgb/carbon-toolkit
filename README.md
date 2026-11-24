@@ -143,120 +143,117 @@ same as for the CAN smoke test.
     docker run --rm carbon:0.5.0 smoke-uds                                                    # udp_multicast fallback
     bash scripts/smoke_uds_cycle.sh                                                          # host with `carbon` on PATH
 
-## Piloter CARBON par MCP
+## Driving CARBON over MCP
 
-v0.3 expose les outils CARBON à un client IA via le Model Context Protocol :
-`carbon mcp serve`. Les mêmes garde-fous que la CLI s'appliquent (registre,
-autorisation, journal) : le serveur n'ajoute aucun chemin d'exécution.
+CARBON exposes its tools to an AI client over the Model Context Protocol:
+`carbon mcp serve`. The same guards as the CLI apply (registry, authorization,
+journal): the server adds no execution path.
 
-### stdio (Claude Desktop et clients similaires)
+### stdio (Claude Desktop and similar clients)
 
     carbon --channel vcan0 --interface socketcan mcp serve --transport stdio
 
-Configuration cliente type : `{"mcpServers": {"carbon": {"command": "carbon",
+Typical client config: `{"mcpServers": {"carbon": {"command": "carbon",
 "args": ["--channel", "vcan0", "mcp", "serve", "--transport", "stdio"]}}}`.
-En stdio la console est le tube du protocole : il n'y a aucun canal
-d'approbation, donc **toute action destructive est refusée**.
+In stdio the console is the protocol pipe, so there is no approval channel and
+**every destructive action is refused**.
 
-### HTTP + token Bearer
+### HTTP + Bearer token
 
     carbon --channel vcan0 mcp serve --transport http --port 8777
 
-Le serveur écoute sur `127.0.0.1` uniquement, endpoint `/mcp`. Un token Bearer
-aléatoire est généré à chaque lancement et écrit hors du dépôt
-(`$XDG_RUNTIME_DIR` ou le répertoire temporaire, permissions 0600) ; seul le
-**chemin** du fichier est affiché. Chaque requête doit porter
-`Authorization: Bearer <token>`, sinon 401.
+The server binds `127.0.0.1` only, endpoint `/mcp`. A random Bearer token is
+generated at each launch and written outside the repository (`$XDG_RUNTIME_DIR`
+or the temp dir, mode 0600); only the file **path** is printed. Every request
+must carry `Authorization: Bearer <token>`, otherwise 401.
 
-### Actions destructives : approbation à la console du serveur
+### Destructive actions: approval at the server console
 
-En HTTP, une action destructive (`can_replay`, `can_inject`, `uds_clear_dtc`)
-est mise en attente (`pending-approval`). L'opérateur la valide **dans la
-console du serveur** (jamais par l'IA) : `list`, `approve <id>`, `deny <id>`.
-Sans réponse, l'action expire et est refusée. Tout est journalisé.
+Over HTTP, a destructive action (`can_replay`, `can_inject`, `uds_clear_dtc`)
+is held (`pending-approval`). The operator approves it **at the server console**
+(never the AI): `list`, `approve <id>`, `deny <id>`. With no answer, the action
+times out and is refused. Everything is journaled.
 
-### Smoke test et vérification manuelle
+### Smoke test and manual check
 
-    bash scripts/smoke_mcp.sh                 # ou : docker run --rm carbon:0.5.0 smoke-mcp
+    bash scripts/smoke_mcp.sh                 # or: docker run --rm carbon:0.5.0 smoke-mcp
 
-Le smoke lance l'ECU simulé et un client MCP en mémoire (outils, `uds_scan`,
-`session_state`, ressource `carbon://journal`, destructif en attente puis
-approuvé).
+The smoke runs the simulated ECU and an in-memory MCP client (tools, `uds_scan`,
+`session_state`, the `carbon://journal` resource, a destructive action held then
+approved).
 
-Check manuel hôte (hors CI, comme `vcan0`/buildx) : piloter le serveur HTTP
-réel avec un modèle local (Ollama, via un client MCP) puis avec un modèle de
-frontière (Claude), sur l'ECU simulé ; vérifier que le scan, la lecture des DID
-et la session fonctionnent, et qu'un `uds_clear_dtc` reste bloqué jusqu'à
-l'`approve` saisi à la console du serveur.
+Host manual check (outside CI, like `vcan0`/buildx): drive the real HTTP server
+with a local model (Ollama, via an MCP client) then a frontier model (Claude),
+against the simulated ECU; verify that scan, DID reads and session work, and
+that `uds_clear_dtc` stays blocked until the `approve` is typed at the server
+console.
 
-## Mode Guidé
+## Guided mode
 
-v0.4 ajoute un parcours guidé : un moteur de méthodologie déclaratif
-(`carbon/methodology/trees/carbon_v1.yaml`) et une interface Textual qui
-déroulent les phases CAN/UDS 1 à 6 (accès, reconnaissance CAN, découverte et
-session UDS, lecture des DTC, seed-key, effacement, rejeu, injection).
+CARBON ships a guided walkthrough: a declarative methodology engine
+(`carbon/methodology/trees/carbon_v1.yaml`) and a Textual UI that walk the
+CAN/UDS phases 1 to 6 (access, CAN reconnaissance, UDS discovery and session,
+DTC read, seed-key, clear, replay, injection).
 
     carbon tui --methodology carbon/methodology/trees/carbon_v1.yaml
 
-Sans matériel, le parcours tourne sur `vcan0` (ou le bus virtuel) avec l'ECU
-simulé (voir « UDS / simulated ECU »). À chaque étape la TUI affiche l'objectif,
-l'outil attendu et le résultat ; l'étape suivante n'est débloquée que si la
-condition de l'étape est remplie. En mode Guidé, un outil hors parcours est
-refusé ; le mode Libre reste disponible.
+With no hardware, the walkthrough runs on `vcan0` (or the virtual bus) with the
+simulated ECU (see "UDS / simulated ECU"). At each step the TUI shows the goal,
+the expected tool and the result; the next step unlocks only once the step's
+condition is met. In Guided mode a tool outside the walkthrough is refused;
+Libre mode stays available.
 
-Les étapes destructrices (`uds_clear_dtc`, `can_replay`, `can_inject`) passent
-toujours par l'approbation : la TUI ouvre une modale que l'opérateur accepte ou
-refuse, le garde-fou v0.3 reste intact et tout est journalisé. La position dans
-le parcours est sauvegardée et reprise au relancement.
+Destructive steps (`uds_clear_dtc`, `can_replay`, `can_inject`) always go
+through approval: the TUI opens a modal the operator accepts or rejects, the
+guard stays intact, and everything is journaled. The walkthrough position is
+saved and resumed on relaunch.
 
-Critère AC-12 : un débutant installe CARBON (source ou Docker) et boucle un
-parcours complet de bout en bout, sur l'ECU simulé, sans autre prérequis.
+AC-12: a beginner installs CARBON (source or Docker) and completes a full
+walkthrough end to end, on the simulated ECU, with no other prerequisite.
 
-### Smoke test du mode guidé
+### Guided smoke test
 
-    bash scripts/smoke_guided.sh                 # ou : docker run --rm carbon:0.5.0 smoke-guided
+    bash scripts/smoke_guided.sh                 # or: docker run --rm carbon:0.5.0 smoke-guided
 
-Le smoke exerce le moteur (sans la TUI) sur l'ECU simulé : déroule les étapes
-1 à 6, approuve les actions destructrices depuis un thread, vérifie l'étape
-finale puis la reprise de l'état persisté, et affiche `smoke GUIDED OK`.
+The smoke exercises the engine (without the TUI) on the simulated ECU: it walks
+steps 1 to 6, approves destructive actions from a thread, checks the final step
+and the resume of persisted state, and prints `smoke GUIDED OK`.
 
-## Mode Web / Carte de surface d'attaque
+## Web mode / attack-surface map
 
-`carbon web` sert un client Web local : une carte de la surface d'attaque
-construite en direct à partir de l'historique de la session, et le mode Libre
-pilotable au clic (lancer un outil, voir le résultat). C'est le même cœur que la
-TUI et le MCP (même `Session`, même registre d'outils, même file d'approbation,
-même journal). Le mode Guidé reste dans la TUI pour l'instant ; le Web est Libre
-uniquement.
+`carbon web` serves a local Web client: a live attack-surface map built from the
+session history, and click-to-run Libre mode (run a tool, see the result). It is
+the same core as the TUI and MCP (same `Session`, tool registry, approval queue
+and journal). Guided mode stays in the TUI for now; the Web client is Libre only.
 
     carbon web                       # 127.0.0.1:8800
     carbon --interface virtual --channel carbon-demo web --port 8800
 
-La commande affiche un lien d'amorçage à usage unique,
-`http://127.0.0.1:<port>/?k=<jeton-web>`, et le chemin du fichier de jeton MCP
-(le MCP reste servi sur `/mcp`). Ouvrir le lien dépose le cookie `carbon_web`
-(HttpOnly, SameSite=Strict) puis redirige (303) vers `/` ; le jeton n'apparaît
-plus dans l'URL ensuite.
+The command prints a single-use bootstrap link,
+`http://127.0.0.1:<port>/?k=<web-token>`, and the path of the MCP token file
+(MCP is still served under `/mcp`). Opening the link sets the `carbon_web`
+cookie (HttpOnly, SameSite=Strict) and redirects (303) to `/`; the token no
+longer appears in the URL afterwards.
 
-Posture de sécurité :
+Security posture:
 
-- écoute sur `127.0.0.1` uniquement (toute autre adresse est refusée) ;
-- le jeton Web est distinct du jeton Bearer MCP : le cookie ne donne pas accès
-  à `/mcp`, et inversement ;
-- cookie `HttpOnly` + `SameSite=Strict` ; contrôle `Host` et `Origin`
-  (requêtes non sûres : `Origin` même origine obligatoire, 403 sinon) ;
-- les actions destructrices (`uds_clear_dtc`, `can_replay`, `can_inject`)
-  exigent une approbation humaine dans la modale du Web (AC-10) : un clic sur
-  l'outil ne suffit pas, et tout est journalisé.
+- binds `127.0.0.1` only (any other address is refused);
+- the Web token is distinct from the MCP Bearer token: the cookie grants no
+  access to `/mcp`, and vice versa;
+- `HttpOnly` + `SameSite=Strict` cookie; `Host`/`Origin` checks (unsafe
+  requests require a same-origin `Origin`, 403 otherwise);
+- destructive actions (`uds_clear_dtc`, `can_replay`, `can_inject`) require
+  human approval in the Web modal (AC-10): a click on the tool is not enough,
+  and everything is journaled.
 
-### Smoke test du Web
+### Web smoke test
 
-    bash scripts/smoke_web.sh                    # ou : docker run --rm carbon:0.5.0 smoke-web
+    bash scripts/smoke_web.sh                    # or: docker run --rm carbon:0.5.0 smoke-web
 
-Sans navigateur ni curl : démarre `carbon web` sur un canal virtuel, suit le lien
-d'amorçage, vérifie que `/api/state` est refusé sans cookie puis renvoie
-`surface` et `tools` avec, que le lien est à usage unique et que le cookie Web
-n'ouvre pas `/mcp`, puis affiche `WEB OK`. Il prouve l'état de session servi,
-l'authentification par cookie et la forme de l'état ; les exécutions d'outils
-sur CAN sont couvertes par la suite de tests (bus virtuel non partagé entre
-processus, l'ECU simulé n'est donc pas lancé).
+With no browser or curl: it starts `carbon web` on a virtual channel, follows
+the bootstrap link, checks that `/api/state` is refused without the cookie then
+returns `surface` and `tools` with it, that the link is single-use and that the
+Web cookie does not open `/mcp`, then prints `WEB OK`. It proves the served
+session state, the cookie auth and the state shape; CAN tool runs are covered by
+the test suite (the in-process virtual bus is not shared between processes, so
+the simulated ECU is not launched here).
