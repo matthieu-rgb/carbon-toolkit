@@ -261,23 +261,23 @@ class CarbonApp(App):
                      f"outil suggéré : {cur['tool'] or '(étape informative, touche a)'}"]
         else:
             sugg = ", ".join(f"{c['id']} ({c['tool'] or 'info'})" for c in m["candidates"])
-            lines = [f"[b]Vue libre[/b] · position : {cur['title']}",
+            lines = [f"[b]Vue libre[/b] - position : {cur['title']}",
                      f"suggestions : {sugg or '-'}",
                      "lance un outil (touche c) ou reviens en Accompagné (touche m)"]
         if self.last_result is not None:
             r = self.last_result
             colour = "green" if r.ok else "red"
             mark = "✓" if r.ok else "✗"
-            lines.append(f"[{colour}]{mark} dernier : {r.tool} — "
+            lines.append(f"[{colour}]{mark} dernier : {r.tool} - "
                          f"{interpret(r.to_dict())}[/]")
         step_w.update("\n".join(lines))
-        status_w.update(f"étape {cur['id']} — "
+        status_w.update(f"étape {cur['id']} - "
                         + ("satisfaite" if m["satisfied"] else "non satisfaite"))
         choices.clear_options()
         show_choices = bool(m["pending_choice"])
         if show_choices:
             for c in m["candidates"]:
-                choices.add_option(f"{c['id']} — {c['title']}")
+                choices.add_option(f"{c['id']} - {c['title']}")
         choices.display = show_choices
         tools.clear_options()
         tools.display = not guided
@@ -286,7 +286,7 @@ class CarbonApp(App):
                 tools.add_option(name)
         step = self.session.engine.current()
         params.display = (not guided) or bool(step.prompt_params)
-        params.placeholder = ("paramètres : " + " ".join(f"{p}=…" for p in step.prompt_params)
+        params.placeholder = ("paramètres : " + " ".join(f"{p}=..." for p in step.prompt_params)
                               if step.prompt_params else "paramètres : clé=valeur ...")
 
     def _show_result(self, text: str) -> None:
@@ -369,7 +369,7 @@ class CarbonApp(App):
             self._show_result(str(exc))
             return
         self.busy = True
-        self._show_result(f"exécution de {tool}…")
+        self._show_result(f"exécution de {tool}...")
         self.run_worker(lambda: self._run_blocking(tool, params), thread=True,
                         name=f"run-{tool}")
 
@@ -418,5 +418,5 @@ class CarbonApp(App):
             banner.add_class(cls)
             banner.update(text)
         self._show_result(
-            f"{result.tool} : {'OK' if result.ok else 'ÉCHEC'} — {result.summary}")
+            f"{result.tool} : {'OK' if result.ok else 'ÉCHEC'} - {result.summary}")
         self.refresh_view()

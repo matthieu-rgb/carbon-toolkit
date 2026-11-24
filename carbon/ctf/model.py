@@ -2,9 +2,9 @@
 """Challenge model, loader, and deterministic flag validation.
 
 A flag is validated by one of three matchers:
-- ``exact``  — case/space-insensitive string equality;
-- ``regex``  — full-match of a pattern (for values that vary per attempt);
-- ``hash``   — sha256 of the normalized submission equals a stored digest, so a
+- ``exact``  - case/space-insensitive string equality;
+- ``regex``  - full-match of a pattern (for values that vary per attempt);
+- ``hash``   - sha256 of the normalized submission equals a stored digest, so a
   shipped challenge file never contains the answer in clear.
 """
 from __future__ import annotations

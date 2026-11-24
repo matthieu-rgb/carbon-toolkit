@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# CARBON CTF — parcours v1, jouable sur le calculateur simulé (carbon emu start).
+# CARBON CTF - parcours v1, jouable sur le calculateur simulé (carbon emu start).
 # Les flags sont stockés hachés (sha256) : la réponse n'est pas en clair ici.
 # On résout chaque challenge avec les outils de CARBON (uds_scan, uds_session,
-# uds_security_access, uds_read_did, uds_read_dtc…), pas un shell dédié.
+# uds_security_access, uds_read_did, uds_read_dtc...), pas un shell dédié.
 # Format de flag attendu : CARBON{...}
 
 - id: recon-sec-service

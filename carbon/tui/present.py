@@ -2,7 +2,7 @@
 """Pure presentation helpers for the TUI.
 
 Phase rail, plain-French interpretation of a tool result, and the services
-panel view. No Textual, no engine mutation — testable in isolation, so the app
+panel view. No Textual, no engine mutation - testable in isolation, so the app
 stays a thin façade.
 """
 from __future__ import annotations
@@ -61,13 +61,13 @@ def interpret(result: dict[str, Any]) -> str:
         sup = data.get("supported") or []
         msg = f"{len(sup)} service(s) répondent"
         if any(str(s).lower() == "0x27" for s in sup):
-            msg += " · 0x27 présent → seed-key possible"
+            msg += " - 0x27 présent -> seed-key possible"
         return msg
     if tool == "uds_session":
         return (f"session {data.get('session', '?')} ouverte" if ok
                 else f"session refusée (NRC {nrc})")
     if tool == "uds_security_access":
-        return (f"déverrouillé · niveau {data.get('level', '?')}" if ok
+        return (f"déverrouillé - niveau {data.get('level', '?')}" if ok
                 else f"déverrouillage refusé (NRC {nrc})")
     if tool == "uds_read_dtc":
         return (f"{len(data.get('dtcs') or [])} DTC" if ok
@@ -88,7 +88,7 @@ def interpret(result: dict[str, Any]) -> str:
     return result.get("summary", "")
 
 
-# Known UDS service codes → short French names for the services panel.
+# Known UDS service codes -> short French names for the services panel.
 _SERVICE_NAMES = {
     "0x10": "session", "0x11": "reset", "0x14": "effacer DTC",
     "0x19": "lire DTC", "0x22": "lire DID", "0x27": "sécurité",
@@ -117,11 +117,11 @@ def device_box(*, unlocked: bool, session: str | None) -> str:
     """A compact pixel-style ECU card, colored by lock state (rich markup)."""
     colour = "green" if unlocked else "red"
     lock = "unlocked" if unlocked else "locked "
-    sess = (session or "—")[:9].ljust(9)
+    sess = (session or "-")[:9].ljust(9)
     return (
         f"[{colour}]┌───────────┐[/]\n"
         f"[{colour}]│[/] [b]ECU 0x7E8[/] [{colour}]│[/]\n"
-        f"[{colour}]│[/] 7E0→7E8  [{colour}]│[/]\n"
+        f"[{colour}]│[/] 7E0->7E8  [{colour}]│[/]\n"
         f"[{colour}]│[/] {sess}[{colour}]│[/]\n"
         f"[{colour}]└──── {lock}─┘[/]"
     )
@@ -140,19 +140,19 @@ def banner_for(result: dict[str, Any]) -> tuple[str, str] | None:
     if not ok:
         return None
     if tool == "uds_security_access":
-        return (f"✓  SÉCURITÉ DÉVERROUILLÉE · niveau {data.get('level', '?')}", "banner-ok")
+        return (f"✓  SÉCURITÉ DÉVERROUILLÉE - niveau {data.get('level', '?')}", "banner-ok")
     if tool == "uds_clear_dtc":
         return ("✓  DTC EFFACÉS", "banner-ok")
     if tool == "uds_read_did":
-        return (f"✓  DID 0x{_as_int(data.get('did')):X} LU · {data.get('value', '?')}", "banner-ok")
+        return (f"✓  DID 0x{_as_int(data.get('did')):X} LU - {data.get('value', '?')}", "banner-ok")
     return None
 
 
 def journal_entries(result: dict[str, Any]) -> list[str]:
     """One or more plain log lines for a result.
 
-    Seed-key is expanded into its challenge/response sequence (requestSeed →
-    sendKey → unlocked), which reads like wifite3's M1→M8 handshake; every other
+    Seed-key is expanded into its challenge/response sequence (requestSeed ->
+    sendKey -> unlocked), which reads like wifite3's M1->M8 handshake; every other
     tool is a single interpreted line.
     """
     tool = result.get("tool", "")
@@ -160,7 +160,7 @@ def journal_entries(result: dict[str, Any]) -> list[str]:
     data = result.get("data") or {}
     if tool == "uds_security_access":
         seed = data.get("seed", "?")
-        lines = [f"seed-key : requestSeed → seed {seed}", "  clé calculée → sendKey"]
+        lines = [f"seed-key : requestSeed -> seed {seed}", "  clé calculée -> sendKey"]
         lines.append(f"✓ niveau {data.get('level', '?')} déverrouillé" if ok
                      else f"✗ refusé (NRC {data.get('nrc', '?')})")
         return lines

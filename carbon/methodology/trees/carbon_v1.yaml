@@ -1,7 +1,7 @@
-# CARBON v1 methodology — parcours guidé CAN/UDS sur l'ECU simulée (sans matériel).
+# CARBON v1 methodology - parcours guidé CAN/UDS sur l'ECU simulée (sans matériel).
 # Déclaratif : chaque étape référence un adaptateur du registre par son nom ; les
 # conditions sont évaluées contre la sortie structurée (ToolResult). Aucun payload
-# d'exploit — des objectifs pédagogiques, des outils existants, des conditions.
+# d'exploit - des objectifs pédagogiques, des outils existants, des conditions.
 # Chaque garde conjoint `ok: true` : une réponse négative (NRC, ok=False) ne fait
 # jamais avancer, même si un champ `data` est renseigné.
 start: acces
