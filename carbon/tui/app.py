@@ -123,6 +123,7 @@ class ApprovalModal(ModalScreen[Decision]):
 class CarbonApp(App):
     TITLE = "CARBON"
     CSS = """
+    Screen { background: #26272c; }
     ApprovalModal { align: center middle; }
     #approval-box { width: 70; height: auto; border: heavy $warning; padding: 1 2;
                     background: $surface; }
@@ -266,7 +267,9 @@ class CarbonApp(App):
             return
         cur = m["current"]
         guided = m["mode"] == "guided"
-        self.sub_title = f"mode {'accompagné' if guided else 'libre'}"
+        # Keep a keyboard-only separator: Textual's Header joins title and
+        # sub_title with an em dash, so fold the mode into the title instead.
+        self.title = f"CARBON  |  mode {'accompagné' if guided else 'libre'}"
         self.query_one("#progress", Static).update(progress_rail(cur["title"]))
         last = self.last_result.to_dict() if self.last_result is not None else None
         step_w.update(action_card(m, last))
